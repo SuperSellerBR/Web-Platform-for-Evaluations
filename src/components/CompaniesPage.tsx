@@ -6,6 +6,7 @@ import { LoadingDots } from './LoadingDots';
 import { useTheme } from '../utils/theme';
 import { normalizeHexColor } from '../utils/cardBaseColor';
 import { fetchCnpjaOffice, isValidCnpj, officeToCompanyFields, onlyDigits, formatCnpj } from '../utils/cnpj';
+import { ImageCropperModal } from './ImageCropperModal';
 
 interface Company {
   id: string;
@@ -138,6 +139,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
   const [socioError, setSocioError] = useState<string>('');
   const [partnerWizardError, setPartnerWizardError] = useState<string>('');
   const [partnerSaving, setPartnerSaving] = useState(false);
+  const [logoCropperFile, setLogoCropperFile] = useState<File | null>(null);
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
   const [cardPage, setCardPage] = useState(1);
   const [logoErrorMap, setLogoErrorMap] = useState<Record<string, boolean>>({});
@@ -418,76 +420,11 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     }
   };
 
-  const createCircularLogoFile = async (file: File) => {
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-    const maxBytes = 5 * 1024 * 1024; // 5MB (antes do processamento)
-    if (!allowedTypes.includes(file.type)) {
-      throw new Error('Formato inválido. Envie PNG, JPG ou WEBP.');
-    }
-    if (file.size > maxBytes) {
-      throw new Error('Imagem muito grande. Envie uma imagem de até 5MB.');
-    }
-
-    const target = 512;
-    const src = URL.createObjectURL(file);
-    try {
-      const img = new Image();
-      img.src = src;
-      if ('decode' in img) {
-        // @ts-expect-error decode existe em navegadores modernos
-        await img.decode();
-      } else {
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = () => reject(new Error('Falha ao carregar imagem'));
-        });
-      }
-
-      const w = (img as any).naturalWidth || img.width;
-      const h = (img as any).naturalHeight || img.height;
-      const side = Math.min(w, h);
-      const sx = (w - side) / 2;
-      const sy = (h - side) / 2;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = target;
-      canvas.height = target;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Não foi possível processar a imagem neste navegador.');
-
-      ctx.clearRect(0, 0, target, target);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(target / 2, target / 2, target / 2, 0, Math.PI * 2);
-      ctx.closePath();
-      ctx.clip();
-      ctx.drawImage(img, sx, sy, side, side, 0, 0, target, target);
-      ctx.restore();
-
-      const blob: Blob = await new Promise((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error('Falha ao gerar a imagem processada'))),
-          'image/png'
-        );
-      });
-
-      return new File([blob], `logo-${Date.now()}.png`, { type: 'image/png' });
-    } finally {
-      URL.revokeObjectURL(src);
-    }
-  };
-
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    // permite selecionar o mesmo arquivo novamente
-    e.target.value = '';
-    if (!file) return;
-
+  const uploadLogoFile = async (file: File) => {
     setLogoUploading(true);
     try {
-      const processed = await createCircularLogoFile(file);
       const formDataUpload = new FormData();
-      formDataUpload.append('file', processed);
+      formDataUpload.append('file', file);
       formDataUpload.append('folder', 'company-logos');
 
       const response = await fetch(
@@ -515,6 +452,13 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     } finally {
       setLogoUploading(false);
     }
+  };
+
+  const handleLogoFileSelection = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setLogoCropperFile(file);
   };
 
 	  const openModal = (company?: Company) => {
@@ -1290,7 +1234,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                       <input
                         type="file"
                         accept="image/png,image/jpeg,image/webp"
-                        onChange={handleLogoUpload}
+                        onChange={handleLogoFileSelection}
                         className="flex-1"
                       />
                       {logoUploading && (
@@ -1726,6 +1670,20 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
 	            </form>
           </div>
         </div>
+      )}
+
+      {logoCropperFile && (
+        <ImageCropperModal
+          file={logoCropperFile}
+          aspectRatio={1}
+          targetWidth={512}
+          targetHeight={512}
+          onCancel={() => setLogoCropperFile(null)}
+          onCrop={(cropped) => {
+            setLogoCropperFile(null);
+            uploadLogoFile(cropped);
+          }}
+        />
       )}
     </Layout>
   );

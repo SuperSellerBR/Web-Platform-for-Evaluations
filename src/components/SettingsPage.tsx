@@ -25,6 +25,7 @@ export function SettingsPage({ user, accessToken, onNavigate, onLogout }: Settin
   const [instaError, setInstaError] = useState('');
   const [instaLoading, setInstaLoading] = useState(false);
   const { theme, resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
 
   const role = (user?.role || '').toString().trim().toLowerCase();
   const isPartner = ['parceiro', 'partner', 'gerente', 'manager', 'vendedor', 'seller'].includes(role);
@@ -66,7 +67,7 @@ export function SettingsPage({ user, accessToken, onNavigate, onLogout }: Settin
 
   return (
     <Layout user={user} currentPage="settings" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="max-w-5xl mx-auto">
+      <div className={`max-w-5xl mx-auto ${isDark ? 'evaluation-dark' : ''}`}>
         <div className="mb-6 sm:mb-8">
           <h2 className="text-foreground mb-2">Configurações</h2>
           <p className="text-muted-foreground">Ajuste preferências da plataforma</p>

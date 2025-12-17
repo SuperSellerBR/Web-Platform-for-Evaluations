@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Layout } from './Layout';
 import { Plus, Edit, Trash2, Search, UserCheck, LayoutGrid, List, X } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
 import { LoadingDots } from './LoadingDots';
 import { formatFullName } from '../utils/name';
 import { useTheme } from '../utils/theme';
+import { ImageCropperModal } from './ImageCropperModal';
 
 interface Evaluator {
   id: string;
@@ -29,7 +30,106 @@ interface EvaluatorsPageProps {
   onLogout: () => void;
 }
 
+type SocioeconomicProfile = {
+  ageRange?: string;
+  gender?: string;
+  maritalStatus?: string;
+  children?: string;
+  incomeClass?: string;
+  education?: string;
+  interests?: string[];
+};
+
+const SOCIO_AGE_RANGES = [
+  'Até 17',
+  '18–24',
+  '25–34',
+  '35–44',
+  '45–54',
+  '55–64',
+  '65+',
+];
+
+const SOCIO_GENDERS = [
+  'Feminino',
+  'Masculino',
+  'Não-binário',
+  'Outro',
+  'Prefere não dizer',
+];
+
+const SOCIO_MARITAL_STATUS = [
+  'Solteiro(a)',
+  'Casado(a)',
+  'União estável',
+  'Divorciado(a)',
+  'Viúvo(a)',
+  'Prefere não dizer',
+];
+
+const SOCIO_CHILDREN = [
+  'Não',
+  'Sim (1)',
+  'Sim (2)',
+  'Sim (3+)',
+  'Prefere não dizer',
+];
+
+const SOCIO_INCOME_CLASS = [
+  'Classe A',
+  'Classe B',
+  'Classe C',
+  'Classe D/E',
+  'Prefere não dizer',
+];
+
+const SOCIO_EDUCATION = [
+  'Fundamental',
+  'Médio',
+  'Superior',
+  'Pós-graduação',
+  'Mestrado/Doutorado',
+  'Prefere não dizer',
+];
+
+const SOCIO_INTERESTS = [
+  'Gastronomia',
+  'Música',
+  'Esportes',
+  'Tecnologia',
+  'Saúde',
+  'Moda',
+  'Viagens',
+  'Beleza',
+  'Filmes e séries',
+  'Games',
+  'Sustentabilidade',
+  'Família',
+  'Educação',
+];
+
 const getDefaultViewMode = () => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'list' : 'card');
+
+const createEmptyEvaluatorFormData = (): Partial<Evaluator> => ({
+  name: '',
+  lastName: '',
+  whatsapp: '',
+  email: '',
+  birthDate: '',
+  gender: 'feminino',
+  address: '',
+  socioeconomicData: {
+    ageRange: '',
+    gender: '',
+    maritalStatus: '',
+    children: '',
+    incomeClass: '',
+    education: '',
+    interests: [],
+  },
+  avatarUrl: '',
+  avatarPath: '',
+});
 
 export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: EvaluatorsPageProps) {
   const { resolvedTheme } = useTheme();
@@ -42,20 +142,11 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
   const [cardPage, setCardPage] = useState(1);
 
-  const [formData, setFormData] = useState<Partial<Evaluator>>({
-    name: '',
-    lastName: '',
-    whatsapp: '',
-    email: '',
-    birthDate: '',
-    gender: 'feminino',
-    address: '',
-    socioeconomicData: {},
-    avatarUrl: '',
-    avatarPath: '',
-  });
+  const [formData, setFormData] = useState<Partial<Evaluator>>(createEmptyEvaluatorFormData());
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [avatarCropperFile, setAvatarCropperFile] = useState<File | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     loadEvaluators();
@@ -144,20 +235,23 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
   const openModal = (evaluator?: Evaluator) => {
     if (evaluator) {
       setEditingEvaluator(evaluator);
-      setFormData(evaluator);
+      setFormData({
+        ...evaluator,
+        socioeconomicData: {
+          ageRange: '',
+          gender: '',
+          maritalStatus: '',
+          children: '',
+          incomeClass: '',
+          education: '',
+          interests: [],
+          ...(evaluator.socioeconomicData || {}),
+        },
+      });
     } else {
       setEditingEvaluator(null);
       setFormData({
-        name: '',
-        lastName: '',
-        whatsapp: '',
-        email: '',
-        birthDate: '',
-        gender: 'feminino',
-        address: '',
-        socioeconomicData: {},
-        avatarUrl: '',
-        avatarPath: '',
+        ...createEmptyEvaluatorFormData(),
       });
     }
     setShowModal(true);
@@ -166,9 +260,32 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
   const closeModal = () => {
     setShowModal(false);
     setEditingEvaluator(null);
-    setFormData({});
+    setFormData(createEmptyEvaluatorFormData());
     setAvatarUploading(false);
     setSaving(false);
+  };
+
+  const getSocioProfile = (): SocioeconomicProfile => {
+    const profile = (formData.socioeconomicData || {}) as SocioeconomicProfile;
+    return {
+      ageRange: profile.ageRange || '',
+      gender: profile.gender || '',
+      maritalStatus: profile.maritalStatus || '',
+      children: profile.children || '',
+      incomeClass: profile.incomeClass || '',
+      education: profile.education || '',
+      interests: Array.isArray(profile.interests) ? profile.interests : [],
+    };
+  };
+
+  const updateSocioProfile = (patch: Partial<SocioeconomicProfile>) => {
+    setFormData((prev) => ({
+      ...prev,
+      socioeconomicData: {
+        ...(prev.socioeconomicData || {}),
+        ...patch,
+      },
+    }));
   };
 
   const filteredEvaluators = evaluators
@@ -189,71 +306,13 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
   const cardStart = (currentEvaluatorPage - 1) * evaluatorsPerPage + 1;
   const cardEnd = Math.min(currentEvaluatorPage * evaluatorsPerPage, filteredEvaluators.length);
 
-  const createCircularAvatarFile = async (file: File) => {
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-    const maxBytes = 5 * 1024 * 1024;
-    if (!allowedTypes.includes(file.type)) throw new Error('Formato inválido. Envie PNG, JPG ou WEBP.');
-    if (file.size > maxBytes) throw new Error('Imagem muito grande. Envie até 5MB.');
+  const socioProfile = getSocioProfile();
 
-    const target = 512;
-    const src = URL.createObjectURL(file);
-    try {
-      const img = new Image();
-      img.src = src;
-      if ('decode' in img) {
-        // @ts-expect-error decode existe em navegadores modernos
-        await img.decode();
-      } else {
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = () => reject(new Error('Falha ao carregar imagem'));
-        });
-      }
-
-      const w = (img as any).naturalWidth || img.width;
-      const h = (img as any).naturalHeight || img.height;
-      const side = Math.min(w, h);
-      const sx = (w - side) / 2;
-      const sy = (h - side) / 2;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = target;
-      canvas.height = target;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Não foi possível processar a imagem neste navegador.');
-
-      ctx.clearRect(0, 0, target, target);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(target / 2, target / 2, target / 2, 0, Math.PI * 2);
-      ctx.closePath();
-      ctx.clip();
-      ctx.drawImage(img, sx, sy, side, side, 0, 0, target, target);
-      ctx.restore();
-
-      const blob: Blob = await new Promise((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error('Falha ao gerar a imagem processada'))),
-          'image/png'
-        );
-      });
-
-      return new File([blob], `avatar-${Date.now()}.png`, { type: 'image/png' });
-    } finally {
-      URL.revokeObjectURL(src);
-    }
-  };
-
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
+  const uploadAvatarFile = async (file: File) => {
     setAvatarUploading(true);
     try {
-      const processed = await createCircularAvatarFile(file);
       const formDataUpload = new FormData();
-      formDataUpload.append('file', processed);
+      formDataUpload.append('file', file);
       formDataUpload.append('folder', 'profile-photos');
 
       const response = await fetch(
@@ -286,6 +345,13 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
     } finally {
       setAvatarUploading(false);
     }
+  };
+
+  const handleAvatarFileSelection = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAvatarCropperFile(file);
   };
 
   return (
@@ -626,10 +692,151 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
                 />
               </div>
 
+              <div className="space-y-4">
+                <div className="rounded-lg border border-border bg-muted/40 p-4">
+                  <p className="text-sm text-muted-foreground">Perfil socioeconômico esperado (opcional)</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Esses dados descrevem o cliente ideal desta rota. Preencha somente o que for relevante.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-foreground mb-2">Idade (faixa)</label>
+                    <select
+                      value={socioProfile.ageRange || ''}
+                      onChange={(e) => updateSocioProfile({ ageRange: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Não informado</option>
+                      {SOCIO_AGE_RANGES.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-foreground mb-2">Gênero esperado</label>
+                    <select
+                      value={socioProfile.gender || ''}
+                      onChange={(e) => updateSocioProfile({ gender: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Não informado</option>
+                      {SOCIO_GENDERS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-foreground mb-2">Estado civil</label>
+                    <select
+                      value={socioProfile.maritalStatus || ''}
+                      onChange={(e) => updateSocioProfile({ maritalStatus: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Não informado</option>
+                      {SOCIO_MARITAL_STATUS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-foreground mb-2">Filhos</label>
+                    <select
+                      value={socioProfile.children || ''}
+                      onChange={(e) => updateSocioProfile({ children: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Não informado</option>
+                      {SOCIO_CHILDREN.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-foreground mb-2">Renda média / classe econômica</label>
+                    <select
+                      value={socioProfile.incomeClass || ''}
+                      onChange={(e) => updateSocioProfile({ incomeClass: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Não informado</option>
+                      {SOCIO_INCOME_CLASS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-foreground mb-2">Escolaridade</label>
+                    <select
+                      value={socioProfile.education || ''}
+                      onChange={(e) => updateSocioProfile({ education: e.target.value })}
+                      className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">Não informado</option>
+                      {SOCIO_EDUCATION.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-foreground mb-2">Interesses</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {SOCIO_INTERESTS.map((interest) => {
+                      const selected = (socioProfile.interests || []).includes(interest);
+                      return (
+                        <label
+                          key={interest}
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                            selected
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-card text-foreground border-border hover:bg-muted'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="accent-current"
+                            checked={selected}
+                            onChange={() => {
+                              const current = socioProfile.interests || [];
+                              const next = selected
+                                ? current.filter((i) => i !== interest)
+                                : [...current, interest];
+                              updateSocioProfile({ interests: next });
+                            }}
+                          />
+                          <span className="text-sm">{interest}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">Escolha nenhum, um ou vários interesses.</p>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-foreground mb-2">Foto de perfil</label>
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-full overflow-hidden border border-border bg-muted flex items-center justify-center">
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="w-16 h-16 min-w-[64px] min-h-[64px] rounded-full overflow-hidden border border-border bg-muted flex items-center justify-center flex-shrink-0">
                     {formData.avatarUrl ? (
                       <img
                         src={String(formData.avatarUrl)}
@@ -642,20 +849,28 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
                     )}
                   </div>
                   <div className="flex-1">
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        onChange={handleAvatarUpload}
-                        className="flex-1"
-                      />
-                      {avatarUploading && (
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                      )}
-                      {formData.avatarPath && !avatarUploading && (
-                        <span className="text-green-500 text-sm">✓ Enviada</span>
-                      )}
-                    </div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => avatarInputRef.current?.click()}
+                      className="px-4 py-2 border border-border rounded-lg text-sm hover:bg-muted transition-colors w-full text-left"
+                    >
+                      Escolher arquivo
+                    </button>
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={handleAvatarFileSelection}
+                      className="sr-only"
+                    />
+                    {avatarUploading && (
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                    )}
+                    {formData.avatarPath && !avatarUploading && (
+                      <span className="text-green-500 text-sm">✓ Enviada</span>
+                    )}
+                  </div>
                     {formData.avatarPath && (
                       <button
                         type="button"
@@ -690,6 +905,21 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
             </form>
           </div>
         </div>
+      )}
+
+      {avatarCropperFile && (
+        <ImageCropperModal
+          file={avatarCropperFile}
+          aspectRatio={1}
+          targetWidth={512}
+          targetHeight={512}
+          circle
+          onCancel={() => setAvatarCropperFile(null)}
+          onCrop={(cropped) => {
+            setAvatarCropperFile(null);
+            uploadAvatarFile(cropped);
+          }}
+        />
       )}
     </Layout>
   );

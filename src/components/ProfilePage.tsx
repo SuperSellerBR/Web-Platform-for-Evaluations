@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Layout } from "./Layout";
 import { projectId } from "../utils/supabase/info";
+import { useTheme } from "../utils/theme";
+import { ImageCropperModal } from "./ImageCropperModal";
 
 interface ProfilePageProps {
   user: any;
@@ -10,12 +12,16 @@ interface ProfilePageProps {
 }
 
 export function ProfilePage({ user, accessToken, onNavigate, onLogout }: ProfilePageProps) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
   const [form, setForm] = useState({ name: user.name || "", lastName: user.lastName || "", phone: user.phone || "" });
   const [avatar, setAvatar] = useState<{ url?: string; path?: string }>({
     url: user.avatarUrl,
     path: user.avatarPath,
   });
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarCropperFile, setAvatarCropperFile] = useState<File | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [avgRating, setAvgRating] = useState<number | null>(null);
@@ -127,71 +133,11 @@ export function ProfilePage({ user, accessToken, onNavigate, onLogout }: Profile
     loadEvaluatorAvatar();
   }, [accessToken, user.evaluatorId, user.id, user.email, user.role]);
 
-  const createCircularAvatarFile = async (file: File) => {
-    const allowedTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
-    const maxBytes = 5 * 1024 * 1024;
-    if (!allowedTypes.includes(file.type)) throw new Error("Formato inválido. Envie PNG, JPG ou WEBP.");
-    if (file.size > maxBytes) throw new Error("Imagem muito grande. Envie até 5MB.");
-
-    const target = 512;
-    const src = URL.createObjectURL(file);
-    try {
-      const img = new Image();
-      img.src = src;
-      if ("decode" in img) {
-        // @ts-expect-error decode existe em navegadores modernos
-        await img.decode();
-      } else {
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = () => reject(new Error("Falha ao carregar imagem"));
-        });
-      }
-
-      const w = (img as any).naturalWidth || img.width;
-      const h = (img as any).naturalHeight || img.height;
-      const side = Math.min(w, h);
-      const sx = (w - side) / 2;
-      const sy = (h - side) / 2;
-
-      const canvas = document.createElement("canvas");
-      canvas.width = target;
-      canvas.height = target;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Não foi possível processar a imagem neste navegador.");
-
-      ctx.clearRect(0, 0, target, target);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(target / 2, target / 2, target / 2, 0, Math.PI * 2);
-      ctx.closePath();
-      ctx.clip();
-      ctx.drawImage(img, sx, sy, side, side, 0, 0, target, target);
-      ctx.restore();
-
-      const blob: Blob = await new Promise((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error("Falha ao gerar a imagem processada"))),
-          "image/png"
-        );
-      });
-
-      return new File([blob], `avatar-${Date.now()}.png`, { type: "image/png" });
-    } finally {
-      URL.revokeObjectURL(src);
-    }
-  };
-
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-
+  const uploadProfileAvatarFile = async (file: File) => {
     setAvatarUploading(true);
     try {
-      const processed = await createCircularAvatarFile(file);
       const formDataUpload = new FormData();
-      formDataUpload.append("file", processed);
+      formDataUpload.append("file", file);
       formDataUpload.append("folder", "profile-photos");
 
       const response = await fetch(
@@ -205,6 +151,11 @@ export function ProfilePage({ user, accessToken, onNavigate, onLogout }: Profile
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Erro ao enviar foto");
       setAvatar({ url: data.url, path: data.path });
+      setFormData((prev) => ({
+        ...prev,
+        avatarUrl: data.url,
+        avatarPath: data.path,
+      }));
       setMessage("Foto atualizada. Salve para aplicar.");
     } catch (err: any) {
       console.error("avatar upload", err);
@@ -212,6 +163,13 @@ export function ProfilePage({ user, accessToken, onNavigate, onLogout }: Profile
     } finally {
       setAvatarUploading(false);
     }
+  };
+
+  const handleProfileAvatarFileSelection = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setAvatarCropperFile(file);
   };
 
   const handlePasswordSave = async () => {
@@ -265,15 +223,15 @@ export function ProfilePage({ user, accessToken, onNavigate, onLogout }: Profile
 
   return (
     <Layout user={user} currentPage="profile" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6">
+      <div className={`max-w-3xl mx-auto space-y-4 sm:space-y-6 ${isDark ? "evaluation-dark" : ""}`}>
         <div>
-          <h2 className="text-gray-900 mb-2">Perfil</h2>
-          <p className="text-gray-600">Atualize seus dados e veja informações da sua conta.</p>
+          <h2 className="text-foreground mb-2">Perfil</h2>
+          <p className="text-muted-foreground">Atualize seus dados e veja informações da sua conta.</p>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-4">
+        <div className="bg-card border border-border rounded-lg shadow-sm p-4 sm:p-6 space-y-4">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center">
+            <div className="w-16 h-16 rounded-full overflow-hidden border border-border bg-muted flex items-center justify-center">
               {avatar.url ? (
                 <img
                   src={avatar.url}
@@ -286,20 +244,28 @@ export function ProfilePage({ user, accessToken, onNavigate, onLogout }: Profile
               )}
             </div>
             <div className="flex-1">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  onChange={handleAvatarUpload}
-                  className="flex-1"
-                />
-                {avatarUploading && (
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                )}
-                {avatar.path && !avatarUploading && (
-                  <span className="text-green-600 text-sm">✓ Enviada</span>
-                )}
-              </div>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="px-4 py-2 border border-border rounded-lg text-sm text-foreground hover:bg-muted transition-colors w-full text-left"
+                  >
+                    Escolher arquivo
+                  </button>
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={handleProfileAvatarFileSelection}
+                    className="sr-only"
+                  />
+                  {avatarUploading && (
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                  )}
+                  {avatar.path && !avatarUploading && (
+                    <span className="text-green-500 text-sm">✓ Enviada</span>
+                  )}
+                </div>
               {avatar.path && (
                 <button
                   type="button"
@@ -313,30 +279,34 @@ export function ProfilePage({ user, accessToken, onNavigate, onLogout }: Profile
           </div>
 
           <div>
-            <label className="block text-sm text-gray-700 mb-1">Nome</label>
+            <label className="block text-sm text-muted-foreground mb-1">Nome</label>
             <input
-              className="w-full border rounded-md px-3 py-2"
+              className="w-full border border-border rounded-md px-3 py-2 bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-700 mb-1">Sobrenome</label>
+            <label className="block text-sm text-muted-foreground mb-1">Sobrenome</label>
             <input
-              className="w-full border rounded-md px-3 py-2"
+              className="w-full border border-border rounded-md px-3 py-2 bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
               value={form.lastName}
               onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))}
               placeholder="Opcional"
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-700 mb-1">Email</label>
-            <input className="w-full border rounded-md px-3 py-2 bg-gray-100 text-gray-500" value={user.email} disabled />
+            <label className="block text-sm text-muted-foreground mb-1">Email</label>
+            <input
+              className="w-full border border-border rounded-md px-3 py-2 bg-muted text-muted-foreground"
+              value={user.email}
+              disabled
+            />
           </div>
           <div>
-            <label className="block text-sm text-gray-700 mb-1">Telefone</label>
+            <label className="block text-sm text-muted-foreground mb-1">Telefone</label>
             <input
-              className="w-full border rounded-md px-3 py-2"
+              className="w-full border border-border rounded-md px-3 py-2 bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
               value={form.phone || ""}
               onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
             />
@@ -350,39 +320,39 @@ export function ProfilePage({ user, accessToken, onNavigate, onLogout }: Profile
               {saving ? "Salvando..." : "Salvar"}
             </button>
           </div>
-          {message && <p className="text-sm text-gray-700">{message}</p>}
+          {message && <p className="text-sm text-muted-foreground">{message}</p>}
         </div>
 
         {user.role === "evaluator" && (
-          <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-2">
-            <h3 className="text-gray-900">Desempenho</h3>
-            <p className="text-gray-600 text-sm">
+          <div className="bg-card border border-border rounded-lg shadow-sm p-4 sm:p-6 space-y-2">
+            <h3 className="text-foreground">Desempenho</h3>
+            <p className="text-muted-foreground text-sm">
               Média das notas dadas pelos gerentes:{" "}
-              {avgRating !== null ? <span className="font-semibold">{avgRating} / 5</span> : "Sem avaliações ainda"}
+              {avgRating !== null ? <span className="font-semibold text-foreground">{avgRating} / 5</span> : "Sem avaliações ainda"}
             </p>
           </div>
         )}
 
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-4">
+        <div className="bg-card border border-border rounded-lg shadow-sm p-4 sm:p-6 space-y-4">
           <div>
-            <h3 className="text-gray-900">Senha</h3>
-            <p className="text-gray-600 text-sm">Atualize sua senha de acesso.</p>
+            <h3 className="text-foreground">Senha</h3>
+            <p className="text-muted-foreground text-sm">Atualize sua senha de acesso.</p>
           </div>
           <div className="space-y-3">
             <div>
-              <label className="block text-sm text-gray-700 mb-1">Nova senha</label>
+              <label className="block text-sm text-muted-foreground mb-1">Nova senha</label>
               <input
                 type="password"
-                className="w-full border rounded-md px-3 py-2"
+                className="w-full border border-border rounded-md px-3 py-2 bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
                 value={passwordForm.newPassword}
                 onChange={(e) => setPasswordForm((f) => ({ ...f, newPassword: e.target.value }))}
               />
             </div>
             <div>
-              <label className="block text-sm text-gray-700 mb-1">Confirmar nova senha</label>
+              <label className="block text-sm text-muted-foreground mb-1">Confirmar nova senha</label>
               <input
                 type="password"
-                className="w-full border rounded-md px-3 py-2"
+                className="w-full border border-border rounded-md px-3 py-2 bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
                 value={passwordForm.confirmPassword}
                 onChange={(e) => setPasswordForm((f) => ({ ...f, confirmPassword: e.target.value }))}
               />
@@ -392,14 +362,28 @@ export function ProfilePage({ user, accessToken, onNavigate, onLogout }: Profile
             <button
               onClick={handlePasswordSave}
               disabled={passwordSaving}
-              className="bg-blue-600 text-white px-4 py-3 sm:py-2 rounded hover:bg-blue-700 transition-colors disabled:opacity-60 w-full sm:w-auto"
+              className="bg-primary text-primary-foreground px-4 py-3 sm:py-2 rounded hover:bg-primary/90 transition-colors disabled:opacity-60 w-full sm:w-auto"
             >
               {passwordSaving ? "Salvando..." : "Atualizar senha"}
             </button>
           </div>
-          {passwordMessage && <p className="text-sm text-gray-700">{passwordMessage}</p>}
+          {passwordMessage && <p className="text-sm text-muted-foreground">{passwordMessage}</p>}
         </div>
       </div>
+      {avatarCropperFile && (
+        <ImageCropperModal
+          file={avatarCropperFile}
+          aspectRatio={1}
+          targetWidth={512}
+          targetHeight={512}
+          circle
+          onCancel={() => setAvatarCropperFile(null)}
+          onCrop={(cropped) => {
+            setAvatarCropperFile(null);
+            uploadProfileAvatarFile(cropped);
+          }}
+        />
+      )}
     </Layout>
   );
 }

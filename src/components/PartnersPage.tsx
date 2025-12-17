@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Layout } from './Layout';
 import { Plus, Edit, Trash2, Search, Users, SlidersHorizontal, LayoutGrid, List, X } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
 import { LoadingDots } from './LoadingDots';
 import { formatFullName } from '../utils/name';
 import { useTheme } from '../utils/theme';
+import { ImageCropperModal } from './ImageCropperModal';
 
 interface Partner {
   id: string;
@@ -40,10 +41,6 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
   const [editingPartner, setEditingPartner] = useState<Partner | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [companyFilter, setCompanyFilter] = useState<string>('');
-  const [avatarUploading, setAvatarUploading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
-  const [groupPage, setGroupPage] = useState(1);
 
   const currentRole = (user?.role || '').toString().trim().toLowerCase();
   const isSeller = currentRole === 'vendedor' || currentRole === 'seller';
@@ -86,6 +83,12 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
     avatarUrl: '',
     avatarPath: '',
   });
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
+  const [groupPage, setGroupPage] = useState(1);
+  const [avatarCropperFile, setAvatarCropperFile] = useState<File | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     loadPartners();
@@ -329,71 +332,11 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
   const groupStart = (currentGroupPage - 1) * groupsPerPage + 1;
   const groupEnd = Math.min(currentGroupPage * groupsPerPage, groupedEntries.length);
 
-  const createCircularAvatarFile = async (file: File) => {
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-    const maxBytes = 5 * 1024 * 1024;
-    if (!allowedTypes.includes(file.type)) throw new Error('Formato inválido. Envie PNG, JPG ou WEBP.');
-    if (file.size > maxBytes) throw new Error('Imagem muito grande. Envie até 5MB.');
-
-    const target = 512;
-    const src = URL.createObjectURL(file);
-    try {
-      const img = new Image();
-      img.src = src;
-      if ('decode' in img) {
-        // @ts-expect-error decode existe em navegadores modernos
-        await img.decode();
-      } else {
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = () => reject(new Error('Falha ao carregar imagem'));
-        });
-      }
-
-      const w = (img as any).naturalWidth || img.width;
-      const h = (img as any).naturalHeight || img.height;
-      const side = Math.min(w, h);
-      const sx = (w - side) / 2;
-      const sy = (h - side) / 2;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = target;
-      canvas.height = target;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Não foi possível processar a imagem neste navegador.');
-
-      ctx.clearRect(0, 0, target, target);
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(target / 2, target / 2, target / 2, 0, Math.PI * 2);
-      ctx.closePath();
-      ctx.clip();
-      ctx.drawImage(img, sx, sy, side, side, 0, 0, target, target);
-      ctx.restore();
-
-      const blob: Blob = await new Promise((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error('Falha ao gerar a imagem processada'))),
-          'image/png'
-        );
-      });
-
-      return new File([blob], `avatar-${Date.now()}.png`, { type: 'image/png' });
-    } finally {
-      URL.revokeObjectURL(src);
-    }
-  };
-
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
+  const uploadPartnerAvatarFile = async (file: File) => {
     setAvatarUploading(true);
     try {
-      const processed = await createCircularAvatarFile(file);
       const formDataUpload = new FormData();
-      formDataUpload.append('file', processed);
+      formDataUpload.append('file', file);
       formDataUpload.append('folder', 'profile-photos');
 
       const response = await fetch(
@@ -426,6 +369,13 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
     } finally {
       setAvatarUploading(false);
     }
+  };
+
+  const handlePartnerAvatarFileSelection = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAvatarCropperFile(file);
   };
 
   const roleRequiresCompany = (role: string | undefined) => {
@@ -568,7 +518,22 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
               </div>
             </div>
           </div>
-        )}
+      )}
+
+      {avatarCropperFile && (
+        <ImageCropperModal
+          file={avatarCropperFile}
+          aspectRatio={1}
+          targetWidth={512}
+          targetHeight={512}
+          circle
+          onCancel={() => setAvatarCropperFile(null)}
+          onCrop={(cropped) => {
+            setAvatarCropperFile(null);
+            uploadPartnerAvatarFile(cropped);
+          }}
+        />
+      )}
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
@@ -879,13 +844,21 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
                       <Users className="w-7 h-7 text-muted-foreground" />
                     )}
                   </div>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                      <button
+                        type="button"
+                        onClick={() => avatarInputRef.current?.click()}
+                        className="px-4 py-2 border border-border rounded-lg text-sm text-foreground hover:bg-muted transition-colors w-full text-left"
+                      >
+                        Escolher arquivo
+                      </button>
                       <input
+                        ref={avatarInputRef}
                         type="file"
                         accept="image/png,image/jpeg,image/webp"
-                        onChange={handleAvatarUpload}
-                        className="flex-1"
+                        onChange={handlePartnerAvatarFileSelection}
+                        className="sr-only"
                       />
                       {avatarUploading && (
                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
