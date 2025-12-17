@@ -60,6 +60,7 @@
   --destructive-foreground: oklch(0.637 0.237 25.331);
   --border: oklch(0.269 0 0);
   --input: oklch(0.269 0 0);
+  --input-background: oklch(0.22 0 0);
   --ring: oklch(0.439 0 0);
   --font-weight-medium: 500;
   --font-weight-normal: 400;
@@ -126,6 +127,53 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+
+  select {
+    background-color: var(--color-input-background) !important;
+    color: var(--color-foreground) !important;
+    -webkit-text-fill-color: var(--color-foreground) !important;
+  }
+
+  select option,
+  select optgroup {
+    color: var(--color-foreground) !important;
+    background-color: var(--color-input-background) !important;
+  }
+
+  .dark select,
+  .dark input[type="date"],
+  .dark input[type="time"],
+  .dark input[type="datetime-local"] {
+    color-scheme: dark;
+  }
+
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"] {
+    background-color: var(--color-input-background) !important;
+    color: var(--color-foreground) !important;
+    -webkit-text-fill-color: var(--color-foreground) !important;
+  }
+
+  input[type="text"],
+  input[type="email"],
+  input[type="number"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="search"],
+  input[type="password"],
+  textarea {
+    background-color: var(--color-input-background) !important;
+    color: var(--color-foreground) !important;
+    -webkit-text-fill-color: var(--color-foreground) !important;
+    border-color: var(--color-border) !important;
+  }
+
+  .dark select,
+  .dark input,
+  .dark textarea {
+    color-scheme: dark;
   }
 }
 
