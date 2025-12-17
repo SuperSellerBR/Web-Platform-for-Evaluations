@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layout } from './Layout';
 import { Calendar, ChevronLeft, ChevronRight, Clock, Plus, User, Pencil, Trash2, QrCode, FilePenLine, Mic, BrainCog, X } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
@@ -6,6 +7,7 @@ import { formatFullName } from '../utils/name';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { LoadingDots } from './LoadingDots';
 import { useTheme } from '../utils/theme';
+import { readTrimmedStringParam, writeQueryParamsPatch } from '../utils/urlQuery';
 
 const STATUS_META = {
   scheduled: {
@@ -68,6 +70,21 @@ const parseDateKey = (key: string | null) => {
   return new Date(y, m - 1, d);
 };
 
+const formatMonthKey = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+};
+
+const parseMonthKey = (key: string | null) => {
+  if (!key) return null;
+  const [yRaw, mRaw] = key.split('-');
+  const y = parseInt(yRaw, 10);
+  const m = parseInt(mRaw, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) return null;
+  return new Date(y, m - 1, 1);
+};
+
 const dateKeyFromValue = (value: any) => {
   if (!value) return '';
   const d = new Date(value);
@@ -120,21 +137,32 @@ interface SchedulePageProps {
   onLogout: () => void;
 }
 
+const SCHEDULE_QUERY_KEYS = {
+  month: 'sch_month',
+  day: 'sch_day',
+} as const;
+
 export function SchedulePage({ user, accessToken, onNavigate, onLogout }: SchedulePageProps) {
+  const queryClient = useQueryClient();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [evaluators, setEvaluators] = useState<any[]>([]);
-  const [evaluations, setEvaluations] = useState<any[]>([]);
-  const [matchedEvaluators, setMatchedEvaluators] = useState<any[]>([]);
-  const [loadingEvaluators, setLoadingEvaluators] = useState(false);
-  const [surveys, setSurveys] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [allowRepeats, setAllowRepeats] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [allowRepeats, setAllowRepeats] = useState(() => readAllowRepeats());
 
-  const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(formatDateKey(new Date()));
+  const initialUrlState = useMemo(() => {
+    const todayKey = formatDateKey(new Date());
+    const dayFromUrl = readTrimmedStringParam(SCHEDULE_QUERY_KEYS.day);
+    const normalizedDayKey = parseDateKey(dayFromUrl) ? dayFromUrl : todayKey;
+    const monthFromUrl = readTrimmedStringParam(SCHEDULE_QUERY_KEYS.month);
+    const month = parseMonthKey(monthFromUrl);
+    const dayDate = parseDateKey(normalizedDayKey);
+    const currentMonth = month || (dayDate ? new Date(dayDate.getFullYear(), dayDate.getMonth(), 1) : new Date());
+    return { currentMonth, selectedDayKey: normalizedDayKey as string | null };
+  }, []);
+
+  const [currentMonth, setCurrentMonth] = useState<Date>(initialUrlState.currentMonth);
+  const [selectedDayKey, setSelectedDayKey] = useState<string | null>(initialUrlState.selectedDayKey);
   const [isMobile, setIsMobile] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editingEvaluation, setEditingEvaluation] = useState<any | null>(null);
@@ -154,19 +182,94 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
   const todayKey = formatDateKey(now);
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const companiesQuery = useQuery<any[]>({
+    queryKey: ['companies', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar empresas');
+      return Array.isArray(data.companies) ? data.companies : [];
+    },
+  });
+  const companies = companiesQuery.data || [];
+
+  const evaluatorsQuery = useQuery<any[]>({
+    queryKey: ['evaluators', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar avaliadores');
+      return Array.isArray(data.evaluators) ? data.evaluators : [];
+    },
+  });
+  const evaluators = evaluatorsQuery.data || [];
+
+  const evaluationsQuery = useQuery<any[]>({
+    queryKey: ['evaluations', accessToken, 'all'],
+    enabled: !!accessToken,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar avaliações');
+      return Array.isArray(data.evaluations) ? data.evaluations : [];
+    },
+  });
+  const evaluations = evaluationsQuery.data || [];
+
+  const surveysQuery = useQuery<any[]>({
+    queryKey: ['surveys', accessToken],
+    enabled: !!accessToken,
+    staleTime: 10 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/surveys`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar questionários');
+      return Array.isArray(data.surveys) ? data.surveys : [];
+    },
+  });
+  const surveys = surveysQuery.data || [];
+  const evaluationsLoading = evaluationsQuery.isPending && evaluations.length === 0;
+  const evaluationsError =
+    evaluationsQuery.isError && evaluations.length === 0
+      ? ((evaluationsQuery.error as any)?.message || 'Erro ao carregar avaliações')
+      : '';
 
   useEffect(() => {
     if (formData.companyId) {
-      loadMatchedEvaluators(formData.companyId);
       const company = companies.find((c) => c.id === formData.companyId);
       if (company?.defaultSurveyId) {
         setFormData((prev) => ({ ...prev, surveyId: company.defaultSurveyId }));
       }
     }
-  }, [formData.companyId, allowRepeats]);
+  }, [companies, formData.companyId]);
+
+  const matchedEvaluatorsQuery = useQuery<any[]>({
+    queryKey: ['matchedEvaluators', accessToken, formData.companyId || '', allowRepeats ? '1' : '0'],
+    enabled: !!accessToken && !!formData.companyId,
+    queryFn: async () => {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/match-evaluators/${formData.companyId}?allowRepeats=${allowRepeats}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar avaliadores');
+      return Array.isArray(data.evaluators) ? data.evaluators : [];
+    },
+  });
+  const matchedEvaluators = matchedEvaluatorsQuery.data || [];
+  const loadingEvaluators = matchedEvaluatorsQuery.isPending && matchedEvaluators.length === 0;
 
   useEffect(() => {
     if (!formData.surveyId && surveys.length > 0) {
@@ -175,8 +278,6 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
   }, [surveys]);
 
   useEffect(() => {
-    setAllowRepeats(readAllowRepeats());
-
     const mq = window.matchMedia('(max-width: 640px)');
     const update = () => setIsMobile(mq.matches);
     update();
@@ -202,6 +303,13 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
     };
   }, []);
 
+  useEffect(() => {
+    writeQueryParamsPatch({
+      [SCHEDULE_QUERY_KEYS.day]: selectedDayKey || null,
+      [SCHEDULE_QUERY_KEYS.month]: formatMonthKey(currentMonth),
+    });
+  }, [currentMonth, selectedDayKey]);
+
   const evaluationsByDate = useMemo(() => {
     const map: Record<string, any[]> = {};
     evaluations.forEach((evaluation) => {
@@ -212,50 +320,6 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
     });
     return map;
   }, [evaluations]);
-
-  const loadData = async () => {
-    try {
-      const headers = { 'Authorization': `Bearer ${accessToken}` };
-
-      const [companiesRes, evaluatorsRes, evaluationsRes, surveysRes] = await Promise.all([
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, { headers }),
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators`, { headers }),
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations`, { headers }),
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/surveys`, { headers }),
-      ]);
-
-      const companiesData = await companiesRes.json();
-      const evaluatorsData = await evaluatorsRes.json();
-      const evaluationsData = await evaluationsRes.json();
-      const surveysData = await surveysRes.json();
-
-      setCompanies(companiesData.companies || []);
-      setEvaluators(evaluatorsData.evaluators || []);
-      setEvaluations(evaluationsData.evaluations || []);
-      setSurveys(surveysData.surveys || []);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    }
-  };
-
-  const loadMatchedEvaluators = async (companyId: string) => {
-    try {
-      setLoadingEvaluators(true);
-      const allow = readAllowRepeats();
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/match-evaluators/${companyId}?allowRepeats=${allow}`,
-        {
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-        }
-      );
-      const data = await response.json();
-      setMatchedEvaluators(data.evaluators || []);
-    } catch (error) {
-      console.error('Error loading matched evaluators:', error);
-    } finally {
-      setLoadingEvaluators(false);
-    }
-  };
 
   const getEffectiveStatus = (evaluation: any): StatusKey => {
     const statusRaw = String(evaluation?.status || '').toLowerCase();
@@ -271,12 +335,12 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
 
   const getCompanyName = (companyId: string) => {
     const company = companies.find((c) => c.id === companyId);
-    return company?.name || 'Empresa';
+    return company?.name || companyId || 'Empresa';
   };
 
   const getEvaluatorName = (evaluatorId: string) => {
     const evaluator = evaluators.find((e) => e.id === evaluatorId);
-    return formatFullName(evaluator?.name, (evaluator as any)?.lastName) || 'Avaliador';
+    return formatFullName(evaluator?.name, (evaluator as any)?.lastName) || evaluatorId || 'Avaliador';
   };
 
   const parseVoucherValue = (value: any) => {
@@ -287,7 +351,7 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSubmitting(true);
 
     try {
       const isEditing = !!editingEvaluation?.id;
@@ -310,7 +374,38 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
       });
 
       if (response.ok) {
-        await loadData();
+        const data = await response.json().catch(() => ({}));
+        const updatedEvaluation =
+          (data?.evaluation && typeof data.evaluation === 'object' ? data.evaluation : null) ||
+          (data?.data?.evaluation && typeof data.data.evaluation === 'object' ? data.data.evaluation : null);
+
+        if (updatedEvaluation?.id) {
+          const savedDayKey = dateKeyFromValue(updatedEvaluation?.scheduledDate) || formData.date;
+          if (savedDayKey) {
+            setSelectedDayKey(savedDayKey);
+            const parsed = parseDateKey(savedDayKey);
+            if (parsed) setCurrentMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+          }
+
+          if (isEditing) {
+            queryClient.setQueriesData({ queryKey: ['evaluations'] }, (prev: unknown) => {
+              if (!Array.isArray(prev)) return prev;
+              return prev.map((ev: any) => (ev?.id === updatedEvaluation.id ? updatedEvaluation : ev));
+            });
+          } else {
+            queryClient.setQueryData(['evaluations', accessToken, 'all'], (prev: unknown) => {
+              const list = Array.isArray(prev) ? prev : [];
+              if (list.some((ev: any) => ev?.id === updatedEvaluation.id)) {
+                return list.map((ev: any) => (ev?.id === updatedEvaluation.id ? updatedEvaluation : ev));
+              }
+              return [updatedEvaluation, ...list];
+            });
+          }
+        }
+
+        queryClient.invalidateQueries({ queryKey: ['evaluations'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
+        queryClient.invalidateQueries({ queryKey: ['matchedEvaluators'] });
         closeModal();
       } else {
         const error = await response.json();
@@ -320,7 +415,7 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
       console.error('Error scheduling evaluation:', error);
       alert('Erro ao agendar avaliação');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -349,7 +444,6 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
       surveyId: '',
       voucherValue: '',
     });
-    setMatchedEvaluators([]);
   };
 
   // Calendar logic
@@ -437,8 +531,13 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Erro ao excluir');
       }
-      setEvaluations((prev) => prev.filter((ev) => ev.id !== evaluationId));
-      await loadData();
+      queryClient.setQueriesData({ queryKey: ['evaluations'] }, (prev: unknown) => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.filter((ev: any) => ev?.id !== evaluationId);
+      });
+      queryClient.invalidateQueries({ queryKey: ['evaluations'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['matchedEvaluators'] });
     } catch (err) {
       console.error('delete error', err);
       alert('Erro ao excluir agendamento');
@@ -450,7 +549,10 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
     const parsed = parseDateKey(dateKey || '');
     setEditingEvaluation(evaluation);
     setSelectedDayKey(dateKey || null);
-    if (parsed) setSelectedDate(parsed);
+    if (parsed) {
+      setSelectedDate(parsed);
+      setCurrentMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+    }
     setFormData({
       companyId: evaluation.companyId || '',
       evaluatorId: evaluation.evaluatorId || '',
@@ -462,7 +564,6 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
         evaluation.voucherValue ?? evaluation.visitData?.voucherValue ?? ''
       ),
     });
-    loadMatchedEvaluators(evaluation.companyId);
     setShowModal(true);
   };
 
@@ -660,10 +761,23 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
             </button>
           </div>
         </div>
-        {filteredEvaluations.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">
-            Nenhuma avaliação para este dia.
-          </div>
+      {filteredEvaluations.length === 0 ? (
+          evaluationsLoading ? (
+            <div className="px-4 py-6 text-sm text-muted-foreground">Carregando avaliações...</div>
+          ) : evaluationsError ? (
+            <div className="px-4 py-6 text-sm text-muted-foreground">
+              <div className="text-destructive">{evaluationsError}</div>
+              <button
+                type="button"
+                onClick={() => evaluationsQuery.refetch()}
+                className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:opacity-90"
+              >
+                Tentar novamente
+              </button>
+            </div>
+          ) : (
+            <div className="px-4 py-6 text-sm text-muted-foreground">Nenhuma avaliação para este dia.</div>
+          )
         ) : (
           <div className="divide-y divide-border max-h-[320px] overflow-auto">
             {filteredEvaluations.map((evaluation) => {
@@ -794,7 +908,11 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
                     const val = e.target.value;
                     setFormData({ ...formData, date: val });
                     const parsed = parseDateKey(val);
-                    if (parsed) setSelectedDate(parsed);
+                    if (parsed) {
+                      setSelectedDate(parsed);
+                      setSelectedDayKey(val);
+                      setCurrentMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+                    }
                   }}
                   className="block w-full max-w-full min-w-0 px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent appearance-none box-border"
                   style={{ WebkitAppearance: 'none' }}
@@ -917,10 +1035,10 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
                 </button>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={submitting}
                   className="w-full sm:flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
                 >
-                  {loading ? (
+                  {submitting ? (
                     <LoadingDots label={editingEvaluation ? 'Salvando' : 'Agendando'} />
                   ) : editingEvaluation ? 'Salvar alterações' : 'Agendar Avaliação'}
                 </button>

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layout } from './Layout';
 import { Plus, Edit, Trash2, Search, UserCheck, LayoutGrid, List, X } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
@@ -6,6 +7,7 @@ import { LoadingDots } from './LoadingDots';
 import { formatFullName } from '../utils/name';
 import { useTheme } from '../utils/theme';
 import { ImageCropperModal } from './ImageCropperModal';
+import { readEnumParam, readIntParam, readTrimmedStringParam, writeQueryParamsPatch } from '../utils/urlQuery';
 
 interface Evaluator {
   id: string;
@@ -110,6 +112,12 @@ const SOCIO_INTERESTS = [
 
 const getDefaultViewMode = () => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'list' : 'card');
 
+const EVALUATORS_QUERY_KEYS = {
+  search: 'evalr_q',
+  view: 'evalr_view',
+  page: 'evalr_page',
+} as const;
+
 const createEmptyEvaluatorFormData = (): Partial<Evaluator> => ({
   name: '',
   lastName: '',
@@ -134,13 +142,39 @@ const createEmptyEvaluatorFormData = (): Partial<Evaluator> => ({
 export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: EvaluatorsPageProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
-  const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const evaluatorsQuery = useQuery<Evaluator[]>({
+    queryKey: ['evaluators', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar avaliadores');
+      return Array.isArray(data.evaluators) ? data.evaluators : [];
+    },
+  });
+  const evaluators = evaluatorsQuery.data || [];
+  const evaluatorsLoading = evaluatorsQuery.isPending && evaluators.length === 0;
+  const evaluatorsError = evaluatorsQuery.isError
+    ? ((evaluatorsQuery.error as any)?.message || 'Erro ao carregar avaliadores')
+    : '';
+
   const [showModal, setShowModal] = useState(false);
   const [editingEvaluator, setEditingEvaluator] = useState<Evaluator | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
-  const [cardPage, setCardPage] = useState(1);
+  const initialUrlState = useMemo(
+    () => ({
+      searchTerm: readTrimmedStringParam(EVALUATORS_QUERY_KEYS.search),
+      viewMode: readEnumParam(EVALUATORS_QUERY_KEYS.view, ['card', 'list'] as const, getDefaultViewMode()),
+      cardPage: readIntParam(EVALUATORS_QUERY_KEYS.page, 1, { min: 1 }),
+    }),
+    []
+  );
+  const [searchTerm, setSearchTerm] = useState(initialUrlState.searchTerm);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(initialUrlState.viewMode);
+  const [cardPage, setCardPage] = useState(initialUrlState.cardPage);
 
   const [formData, setFormData] = useState<Partial<Evaluator>>(createEmptyEvaluatorFormData());
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -149,33 +183,16 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    loadEvaluators();
-  }, []);
+    writeQueryParamsPatch({
+      [EVALUATORS_QUERY_KEYS.search]: searchTerm || null,
+      [EVALUATORS_QUERY_KEYS.view]: viewMode,
+      [EVALUATORS_QUERY_KEYS.page]: cardPage > 1 ? String(cardPage) : null,
+    });
+  }, [cardPage, searchTerm, viewMode]);
 
   useEffect(() => {
     setCardPage(1);
   }, [searchTerm, viewMode]);
-
-  const loadEvaluators = async () => {
-    try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
-      );
-      const data = await response.json();
-      if (data.evaluators) {
-        setEvaluators(data.evaluators);
-      }
-    } catch (error) {
-      console.error('Error loading evaluators:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -196,7 +213,8 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
       });
 
       if (response.ok) {
-        await loadEvaluators();
+        await queryClient.invalidateQueries({ queryKey: ['evaluators'] });
+        await queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
         closeModal();
       } else {
         const error = await response.json();
@@ -225,7 +243,8 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
       );
 
       if (response.ok) {
-        await loadEvaluators();
+        await queryClient.invalidateQueries({ queryKey: ['evaluators'] });
+        await queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       }
     } catch (error) {
       console.error('Error deleting evaluator:', error);
@@ -413,9 +432,22 @@ export function EvaluatorsPage({ user, accessToken, onNavigate, onLogout }: Eval
           </div>
         </div>
 
-        {loading ? (
+        {evaluatorsLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </div>
+        ) : evaluatorsError ? (
+          <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-sm">
+            <UserCheck className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Erro ao carregar avaliadores</h3>
+            <p className="text-muted-foreground mb-6">{evaluatorsError}</p>
+            <button
+              type="button"
+              onClick={() => evaluatorsQuery.refetch()}
+              className="px-6 py-3 rounded-lg border border-border hover:bg-muted transition-colors"
+            >
+              Tentar novamente
+            </button>
           </div>
         ) : filteredEvaluators.length === 0 ? (
           <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-sm">

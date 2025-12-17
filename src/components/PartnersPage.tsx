@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layout } from './Layout';
 import { Plus, Edit, Trash2, Search, Users, SlidersHorizontal, LayoutGrid, List, X } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
@@ -6,6 +7,7 @@ import { LoadingDots } from './LoadingDots';
 import { formatFullName } from '../utils/name';
 import { useTheme } from '../utils/theme';
 import { ImageCropperModal } from './ImageCropperModal';
+import { readEnumParam, readIntParam, readTrimmedStringParam, writeQueryParamsPatch } from '../utils/urlQuery';
 
 interface Partner {
   id: string;
@@ -30,17 +32,65 @@ interface PartnersPageProps {
 
 const getDefaultViewMode = () => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'list' : 'card');
 
+const TEAM_QUERY_KEYS = {
+  search: 'team_q',
+  company: 'team_company',
+  view: 'team_view',
+  page: 'team_page',
+} as const;
+
 export function PartnersPage({ user, accessToken, onNavigate, onLogout }: PartnersPageProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
-  const [partners, setPartners] = useState<Partner[]>([]);
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const partnersQuery = useQuery<Partner[]>({
+    queryKey: ['partners', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar equipe');
+      return Array.isArray(data.partners) ? data.partners : [];
+    },
+  });
+  const partners = partnersQuery.data || [];
+  const partnersLoading = partnersQuery.isPending && partners.length === 0;
+  const partnersError = partnersQuery.isError
+    ? ((partnersQuery.error as any)?.message || 'Erro ao carregar equipe')
+    : '';
+
+  const companiesQuery = useQuery<any[]>({
+    queryKey: ['companies', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar empresas');
+      return Array.isArray(data.companies) ? data.companies : [];
+    },
+  });
+  const companies = companiesQuery.data || [];
+
   const [showModal, setShowModal] = useState(false);
   const [filterModal, setFilterModal] = useState(false);
   const [editingPartner, setEditingPartner] = useState<Partner | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [companyFilter, setCompanyFilter] = useState<string>('');
+  const initialUrlState = useMemo(
+    () => ({
+      searchTerm: readTrimmedStringParam(TEAM_QUERY_KEYS.search),
+      companyFilter: readTrimmedStringParam(TEAM_QUERY_KEYS.company),
+      viewMode: readEnumParam(TEAM_QUERY_KEYS.view, ['card', 'list'] as const, getDefaultViewMode()),
+      groupPage: readIntParam(TEAM_QUERY_KEYS.page, 1, { min: 1 }),
+    }),
+    []
+  );
+  const [searchTerm, setSearchTerm] = useState(initialUrlState.searchTerm);
+  const [companyFilter, setCompanyFilter] = useState<string>(initialUrlState.companyFilter);
 
   const currentRole = (user?.role || '').toString().trim().toLowerCase();
   const isSeller = currentRole === 'vendedor' || currentRole === 'seller';
@@ -85,59 +135,23 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
   });
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
-  const [groupPage, setGroupPage] = useState(1);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(initialUrlState.viewMode);
+  const [groupPage, setGroupPage] = useState(initialUrlState.groupPage);
   const [avatarCropperFile, setAvatarCropperFile] = useState<File | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    loadPartners();
-    loadCompanies();
-  }, []);
+    writeQueryParamsPatch({
+      [TEAM_QUERY_KEYS.search]: searchTerm || null,
+      [TEAM_QUERY_KEYS.company]: companyFilter || null,
+      [TEAM_QUERY_KEYS.view]: viewMode,
+      [TEAM_QUERY_KEYS.page]: groupPage > 1 ? String(groupPage) : null,
+    });
+  }, [companyFilter, groupPage, searchTerm, viewMode]);
 
   useEffect(() => {
     setGroupPage(1);
   }, [searchTerm, companyFilter, viewMode]);
-
-  const loadPartners = async () => {
-    try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
-      );
-      const data = await response.json();
-      if (data.partners) {
-        setPartners(data.partners);
-      }
-    } catch (error) {
-      console.error('Error loading partners:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadCompanies = async () => {
-    try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
-      );
-      const data = await response.json();
-      if (data.companies) {
-        setCompanies(data.companies);
-      }
-    } catch (error) {
-      console.error('Error loading companies:', error);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,7 +187,7 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
       });
 
       if (response.ok) {
-        await loadPartners();
+        await queryClient.invalidateQueries({ queryKey: ['partners'] });
         closeModal();
       } else {
         const error = await response.json();
@@ -202,7 +216,7 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
       );
 
       if (response.ok) {
-        await loadPartners();
+        await queryClient.invalidateQueries({ queryKey: ['partners'] });
       }
     } catch (error) {
       console.error('Error deleting partner:', error);
@@ -535,9 +549,22 @@ export function PartnersPage({ user, accessToken, onNavigate, onLogout }: Partne
         />
       )}
 
-        {loading ? (
+        {partnersLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </div>
+        ) : partnersError ? (
+          <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-sm">
+            <Users className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Erro ao carregar equipe</h3>
+            <p className="text-muted-foreground mb-6">{partnersError}</p>
+            <button
+              type="button"
+              onClick={() => partnersQuery.refetch()}
+              className="px-6 py-3 rounded-lg border border-border hover:bg-muted transition-colors"
+            >
+              Tentar novamente
+            </button>
           </div>
         ) : filteredPartners.length === 0 ? (
           <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-sm">

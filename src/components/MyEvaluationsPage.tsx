@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Layout } from './Layout';
 import { BrainCog, ClipboardList, FilePenLine, FileText, Mic, QrCode } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
@@ -55,11 +56,8 @@ function StatusIconButton(props: {
 export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: MyEvaluationsPageProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
-  const [evaluations, setEvaluations] = useState<any[]>([]);
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [statusTooltipOpen, setStatusTooltipOpen] = useState<string | null>(null);
-  const [evaluatorInfo, setEvaluatorInfo] = useState<any | null>(null);
+  const evaluatorId = (user?.evaluatorId || '').toString();
 
   useEffect(() => {
     if (!statusTooltipOpen) return;
@@ -67,47 +65,57 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
     return () => window.clearTimeout(t);
   }, [statusTooltipOpen]);
 
-  useEffect(() => {
-    if (user.evaluatorId) {
-      loadEvaluations();
-    }
-  }, [user.evaluatorId]);
+  const companiesQuery = useQuery<any[]>({
+    queryKey: ['companies', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar empresas');
+      return Array.isArray(data.companies) ? data.companies : [];
+    },
+  });
+  const companies = companiesQuery.data || [];
 
-  const loadEvaluations = async () => {
-    try {
-      const headers = { 'Authorization': `Bearer ${accessToken}` };
+  const evaluationsQuery = useQuery<any[]>({
+    queryKey: ['evaluations', accessToken, `evaluator:${evaluatorId}`],
+    enabled: !!accessToken && !!evaluatorId,
+    queryFn: async () => {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations?evaluatorId=${evaluatorId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar avaliações');
+      return Array.isArray(data.evaluations) ? data.evaluations : [];
+    },
+  });
+  const evaluations = evaluationsQuery.data || [];
 
-      const evaluatorPromise = user.evaluatorId
-        ? fetch(
-            `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators/${user.evaluatorId}`,
-            { headers }
-          )
-        : null;
+  const evaluatorQuery = useQuery<any | null>({
+    queryKey: ['evaluator', accessToken, evaluatorId],
+    enabled: !!accessToken && !!evaluatorId,
+    staleTime: 10 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators/${evaluatorId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar avaliador');
+      return data?.evaluator && typeof data.evaluator === 'object' ? data.evaluator : null;
+    },
+  });
+  const evaluatorInfo = evaluatorQuery.data || null;
 
-      const [evaluationsRes, companiesRes, evaluatorRes] = await Promise.all([
-        fetch(
-          `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations?evaluatorId=${user.evaluatorId}`,
-          { headers }
-        ),
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, { headers }),
-        evaluatorPromise ?? Promise.resolve(null),
-      ]);
-
-      const evaluationsData = await evaluationsRes.json();
-      const companiesData = await companiesRes.json();
-      if (evaluatorRes) {
-        const evaluatorData = await evaluatorRes.json();
-        if (evaluatorData?.evaluator) setEvaluatorInfo(evaluatorData.evaluator);
-      }
-
-      setEvaluations(evaluationsData.evaluations || []);
-      setCompanies(companiesData.companies || []);
-    } catch (error) {
-      console.error('Error loading evaluations:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loading = evaluationsQuery.isPending && evaluations.length === 0;
+  const pageError =
+    evaluationsQuery.isError && evaluations.length === 0
+      ? ((evaluationsQuery.error as any)?.message || 'Erro ao carregar avaliações')
+      : '';
 
   const getCompany = (companyId: string) => {
     return companies.find(c => c.id === companyId);
@@ -212,7 +220,24 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
           <p className="text-muted-foreground">Veja suas avaliações pendentes e concluídas</p>
         </div>
 
-        {loading ? (
+        {pageError ? (
+          <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-md">
+            <ClipboardList className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Não foi possível carregar</h3>
+            <p className="text-muted-foreground mb-6">{pageError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                evaluationsQuery.refetch();
+                companiesQuery.refetch();
+                evaluatorQuery.refetch();
+              }}
+              className="bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:opacity-90 transition-colors w-full sm:w-auto"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>

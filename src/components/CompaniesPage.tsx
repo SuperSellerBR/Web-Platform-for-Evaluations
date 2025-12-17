@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layout } from './Layout';
 import { Plus, Edit, Trash2, Search, Building2, LayoutGrid, List, X } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
@@ -7,6 +8,7 @@ import { useTheme } from '../utils/theme';
 import { normalizeHexColor } from '../utils/cardBaseColor';
 import { fetchCnpjaOffice, isValidCnpj, officeToCompanyFields, onlyDigits, formatCnpj } from '../utils/cnpj';
 import { ImageCropperModal } from './ImageCropperModal';
+import { readEnumParam, readIntParam, readTrimmedStringParam, writeQueryParamsPatch } from '../utils/urlQuery';
 
 interface Company {
   id: string;
@@ -50,6 +52,12 @@ interface CompaniesPageProps {
 }
 
 const getDefaultViewMode = () => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'list' : 'card');
+
+const COMPANIES_QUERY_KEYS = {
+  search: 'cmp_q',
+  view: 'cmp_view',
+  page: 'cmp_page',
+} as const;
 
 const SOCIO_AGE_RANGES = [
   'Até 17',
@@ -122,15 +130,69 @@ const SOCIO_INTERESTS = [
 export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: CompaniesPageProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [partners, setPartners] = useState<any[]>([]);
-  const [surveys, setSurveys] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const companiesQuery = useQuery<Company[]>({
+    queryKey: ['companies', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar empresas');
+      return Array.isArray(data.companies) ? data.companies : [];
+    },
+  });
+  const companies = companiesQuery.data || [];
+  const companiesLoading = companiesQuery.isPending && companies.length === 0;
+  const companiesError = companiesQuery.isError
+    ? ((companiesQuery.error as any)?.message || 'Erro ao carregar empresas')
+    : '';
+
+  const partnersQuery = useQuery<any[]>({
+    queryKey: ['partners', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar equipe');
+      return Array.isArray(data.partners) ? data.partners : [];
+    },
+  });
+  const partners = partnersQuery.data || [];
+
+  const surveysQuery = useQuery<any[]>({
+    queryKey: ['surveys', accessToken],
+    enabled: !!accessToken && String(user?.role || '').toLowerCase() === 'admin',
+    staleTime: 10 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/surveys`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar questionários');
+      return Array.isArray(data.surveys) ? data.surveys : [];
+    },
+  });
+  const surveys = surveysQuery.data || [];
+
   const [showModal, setShowModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [companyWizardMode, setCompanyWizardMode] = useState<'create' | 'edit'>('create');
   const [companyWizardStep, setCompanyWizardStep] = useState<1 | 2 | 3>(1);
-  const [searchTerm, setSearchTerm] = useState('');
+  const initialUrlState = useMemo(
+    () => ({
+      searchTerm: readTrimmedStringParam(COMPANIES_QUERY_KEYS.search),
+      viewMode: readEnumParam(COMPANIES_QUERY_KEYS.view, ['card', 'list'] as const, getDefaultViewMode()),
+      cardPage: readIntParam(COMPANIES_QUERY_KEYS.page, 1, { min: 1 }),
+    }),
+    []
+  );
+  const [searchTerm, setSearchTerm] = useState(initialUrlState.searchTerm);
   const [uploading, setUploading] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -140,8 +202,8 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
   const [partnerWizardError, setPartnerWizardError] = useState<string>('');
   const [partnerSaving, setPartnerSaving] = useState(false);
   const [logoCropperFile, setLogoCropperFile] = useState<File | null>(null);
-  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
-  const [cardPage, setCardPage] = useState(1);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(initialUrlState.viewMode);
+  const [cardPage, setCardPage] = useState(initialUrlState.cardPage);
   const [logoErrorMap, setLogoErrorMap] = useState<Record<string, boolean>>({});
 
   const [formData, setFormData] = useState<Partial<Company>>({
@@ -189,12 +251,12 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
   });
 
   useEffect(() => {
-    loadCompanies();
-    loadPartners();
-    if (user.role === 'admin') {
-      loadSurveys();
-    }
-  }, []);
+    writeQueryParamsPatch({
+      [COMPANIES_QUERY_KEYS.search]: searchTerm || null,
+      [COMPANIES_QUERY_KEYS.view]: viewMode,
+      [COMPANIES_QUERY_KEYS.page]: cardPage > 1 ? String(cardPage) : null,
+    });
+  }, [cardPage, searchTerm, viewMode]);
 
   useEffect(() => {
     setCardPage(1);
@@ -204,65 +266,6 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     acc[s.id] = s.title;
     return acc;
   }, {});
-
-  const loadCompanies = async () => {
-    try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
-      );
-      const data = await response.json();
-      if (data.companies) {
-        setCompanies(data.companies);
-      }
-    } catch (error) {
-      console.error('Error loading companies:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadSurveys = async () => {
-    try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/surveys`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setSurveys(data.surveys || []);
-      }
-    } catch (err) {
-      console.error('Error loading surveys:', err);
-    }
-  };
-
-  const loadPartners = async () => {
-    try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
-      );
-      const data = await response.json();
-      if (data.partners) {
-        setPartners(data.partners);
-      }
-    } catch (error) {
-      console.error('Error loading partners:', error);
-    }
-  };
 
   const normalizeCardBaseColor = (input: any) => {
     if (typeof input !== 'string') return undefined;
@@ -336,7 +339,8 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
         const saved = await saveCompany(payload, companyId || undefined);
         setEditingCompany(saved);
         setFormData((prev) => ({ ...prev, ...saved }));
-        await loadCompanies();
+        await queryClient.invalidateQueries({ queryKey: ['companies'] });
+        await queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
         setCompanyWizardStep(2);
         return;
       }
@@ -350,7 +354,8 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
         const saved = await saveCompany(payload, companyId);
         setEditingCompany(saved);
         setFormData((prev) => ({ ...prev, ...saved }));
-        await loadCompanies();
+        await queryClient.invalidateQueries({ queryKey: ['companies'] });
+        await queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
         setCompanyWizardStep(3);
       }
     } catch (error: any) {
@@ -376,7 +381,8 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
       );
 
       if (response.ok) {
-        await loadCompanies();
+        await queryClient.invalidateQueries({ queryKey: ['companies'] });
+        await queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       }
     } catch (error) {
       console.error('Error deleting company:', error);
@@ -666,7 +672,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
         return;
       }
 
-      await loadPartners();
+      await queryClient.invalidateQueries({ queryKey: ['partners'] });
       setPartnerFormData({
         name: '',
         lastName: '',
@@ -779,9 +785,22 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
           </div>
         </div>
 
-        {loading ? (
+        {companiesLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </div>
+        ) : companiesError ? (
+          <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-sm">
+            <Building2 className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Erro ao carregar empresas</h3>
+            <p className="text-muted-foreground mb-6">{companiesError}</p>
+            <button
+              type="button"
+              onClick={() => companiesQuery.refetch()}
+              className="px-6 py-3 rounded-lg border border-border hover:bg-muted transition-colors"
+            >
+              Tentar novamente
+            </button>
           </div>
         ) : filteredCompanies.length === 0 ? (
           <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-sm">
@@ -1656,8 +1675,11 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                       <button
                         type="button"
                         onClick={async () => {
-                          await loadCompanies();
-                          await loadPartners();
+                          await Promise.all([
+                            queryClient.invalidateQueries({ queryKey: ['companies'] }),
+                            queryClient.invalidateQueries({ queryKey: ['partners'] }),
+                            queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] }),
+                          ]);
                           closeModal();
                         }}
                         className="w-full sm:flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"

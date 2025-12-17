@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layout } from './Layout';
 import { projectId } from '../utils/supabase/info';
 import { CheckCircle, Crown, Globe, Medal, SlidersHorizontal, Sparkles, ThumbsDown, ThumbsUp, Trophy, X } from 'lucide-react';
@@ -26,6 +27,77 @@ import servirHeader from '../../assets/SERVIR.png';
 import servirHeaderDark from '../../assets/SERVIRW.png';
 import goldHeader from '../../assets/GOLD.png';
 import { useTheme } from '../utils/theme';
+
+const DASHBOARD_FILTER_QUERY_KEYS = {
+  companyId: 'dash_companyId',
+  sellerId: 'dash_sellerId',
+  status: 'dash_status',
+  fromDate: 'dash_from',
+  toDate: 'dash_to',
+  period: 'dash_period',
+} as const;
+
+type DashboardPeriodPreset = 'all' | 'last1w' | 'last4w' | 'custom';
+
+const readDashboardFiltersFromUrl = () => {
+  if (typeof window === 'undefined') {
+    return {
+      companyId: '',
+      sellerId: '',
+      status: '',
+      fromDate: '',
+      toDate: '',
+      periodPreset: 'all' as DashboardPeriodPreset,
+    };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const periodRaw = (params.get(DASHBOARD_FILTER_QUERY_KEYS.period) || '').trim();
+  const periodPreset: DashboardPeriodPreset =
+    periodRaw === 'all' || periodRaw === 'last1w' || periodRaw === 'last4w' || periodRaw === 'custom'
+      ? (periodRaw as DashboardPeriodPreset)
+      : 'all';
+
+  return {
+    companyId: (params.get(DASHBOARD_FILTER_QUERY_KEYS.companyId) || '').trim(),
+    sellerId: (params.get(DASHBOARD_FILTER_QUERY_KEYS.sellerId) || '').trim(),
+    status: (params.get(DASHBOARD_FILTER_QUERY_KEYS.status) || '').trim(),
+    fromDate: (params.get(DASHBOARD_FILTER_QUERY_KEYS.fromDate) || '').trim(),
+    toDate: (params.get(DASHBOARD_FILTER_QUERY_KEYS.toDate) || '').trim(),
+    periodPreset,
+  };
+};
+
+const writeDashboardFiltersToUrl = (filters: {
+  companyId: string;
+  sellerId: string;
+  status: string;
+  fromDate: string;
+  toDate: string;
+  periodPreset: DashboardPeriodPreset;
+}) => {
+  if (typeof window === 'undefined') return;
+
+  const url = new URL(window.location.href);
+  const params = url.searchParams;
+
+  const setOrDelete = (key: string, value: string) => {
+    if (value) params.set(key, value);
+    else params.delete(key);
+  };
+
+  setOrDelete(DASHBOARD_FILTER_QUERY_KEYS.companyId, filters.companyId);
+  setOrDelete(DASHBOARD_FILTER_QUERY_KEYS.sellerId, filters.sellerId);
+  setOrDelete(DASHBOARD_FILTER_QUERY_KEYS.status, filters.status);
+  setOrDelete(DASHBOARD_FILTER_QUERY_KEYS.fromDate, filters.fromDate);
+  setOrDelete(DASHBOARD_FILTER_QUERY_KEYS.toDate, filters.toDate);
+
+  if (filters.periodPreset !== 'all') params.set(DASHBOARD_FILTER_QUERY_KEYS.period, filters.periodPreset);
+  else params.delete(DASHBOARD_FILTER_QUERY_KEYS.period);
+
+  const next = `${url.pathname}${params.toString() ? `?${params.toString()}` : ''}${url.hash}`;
+  window.history.replaceState(window.history.state, '', next);
+};
 
 interface DashboardProps {
   user: any;
@@ -72,33 +144,16 @@ const mixColor = (color: string, opacity: number) =>
   `color-mix(in srgb, ${color} ${Math.round(opacity * 100)}%, transparent)`;
 
 export function Dashboard({ user, accessToken, onNavigate, onLogout }: DashboardProps) {
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [prefilterReady, setPrefilterReady] = useState(false);
   const [computedNps, setComputedNps] = useState<number | null>(null);
-  const [timelineData, setTimelineData] = useState<
-    { label: string; date: string; overall: number | null; servir: number | null; gold: number | null }[]
-  >([]);
-  const [timelineDebug, setTimelineDebug] = useState<{
-    total: number;
-    afterFilters: number;
-    completedWithAi: number;
-    missingAi: number;
-    withValidDate: number;
-    missingDate: number;
-  } | null>(null);
 
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [teamMembers, setTeamMembers] = useState<any[]>([]);
-  const [sellerIdsWithEvaluations, setSellerIdsWithEvaluations] = useState<string[]>([]);
-
-  const [companyId, setCompanyId] = useState('');
-  const [sellerId, setSellerId] = useState('');
-  const [status, setStatus] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [periodPreset, setPeriodPreset] = useState<'all' | 'last1w' | 'last4w' | 'custom'>('all');
+  const initialUrlFilters = useMemo(() => readDashboardFiltersFromUrl(), []);
+  const [companyId, setCompanyId] = useState(initialUrlFilters.companyId);
+  const [sellerId, setSellerId] = useState(initialUrlFilters.sellerId);
+  const [status, setStatus] = useState(initialUrlFilters.status);
+  const [fromDate, setFromDate] = useState(initialUrlFilters.fromDate);
+  const [toDate, setToDate] = useState(initialUrlFilters.toDate);
+  const [periodPreset, setPeriodPreset] = useState<DashboardPeriodPreset>(initialUrlFilters.periodPreset);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [logoError, setLogoError] = useState(false);
   const { resolvedTheme } = useTheme();
@@ -157,31 +212,75 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
   const hideSellerFilter = role === 'vendedor' || role === 'seller';
   const isSellerUser = role === 'vendedor' || role === 'seller';
   const npsQuestionIdsBySurveyRef = useRef<Map<string, string[]>>(new Map());
-  const summaryReqSeqRef = useRef(0);
-  const timelineReqSeqRef = useRef(0);
-  const overallScore100 =
-    summary?.averages.overall != null ? Number((summary.averages.overall * 10).toFixed(0)) : null;
-  const OverallScoreIcon =
-    overallScore100 != null && overallScore100 >= 80
-      ? Trophy
-      : overallScore100 != null && overallScore100 >= 60
-        ? Medal
-        : null;
+  const queryClient = useQueryClient();
 
-  const NpsIcon =
-    computedNps == null
-      ? null
-      : computedNps < 0
-        ? ThumbsDown
-        : computedNps >= 70
-          ? Crown
-          : computedNps > 50
-            ? Sparkles
-            : computedNps > 20
-              ? CheckCircle
-              : computedNps > 0
-                ? ThumbsUp
-                : null;
+  const companiesQuery = useQuery<any[]>({
+    queryKey: ['companies', accessToken],
+    enabled: !!accessToken,
+    queryFn: async () => {
+      const headers = { Authorization: `Bearer ${accessToken}` };
+      const res = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, { headers });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Erro ao carregar empresas');
+      return Array.isArray(data.companies) ? data.companies : [];
+    },
+  });
+  const companies = companiesQuery.data || [];
+
+  const partnersQuery = useQuery<any[]>({
+    queryKey: ['partners', accessToken],
+    enabled: !!accessToken && !hideSellerFilter,
+    queryFn: async () => {
+      const headers = { Authorization: `Bearer ${accessToken}` };
+      const res = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`, { headers });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Erro ao carregar parceiros');
+      return Array.isArray(data.partners) ? data.partners : [];
+    },
+  });
+
+  const teamMembers = useMemo(() => {
+    if (hideSellerFilter) return [];
+    const members = partnersQuery.data || [];
+    const normalize = (v: any) => (v || '').toString().trim().toLowerCase();
+    return members.filter((p: any) => ['vendedor', 'seller', 'gerente', 'manager'].includes(normalize(p?.role)));
+  }, [hideSellerFilter, partnersQuery.data]);
+
+  const summaryQuery = useQuery<Summary>({
+    queryKey: ['dashboardSummary', accessToken, { companyId, sellerId, status, fromDate, toDate }],
+    enabled: !!accessToken && prefilterReady && !isSellerUser,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (companyId) params.set('companyId', companyId);
+      if (sellerId) params.set('sellerId', sellerId);
+      if (status) params.set('status', status);
+      if (fromDate) params.set('from', fromDate);
+      if (toDate) params.set('to', toDate);
+      const res = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/dashboard/summary?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Erro ao carregar dashboard');
+      return data as Summary;
+    },
+  });
+
+  const evaluationsQuery = useQuery<any[]>({
+    queryKey: ['evaluations', accessToken, companyId || 'all'],
+    enabled: !!accessToken && prefilterReady,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (companyId) params.set('companyId', companyId);
+      const res = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations${params.toString() ? `?${params.toString()}` : ''}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Erro ao carregar avaliações');
+      return Array.isArray(data.evaluations) ? data.evaluations : [];
+    },
+  });
 
   // Pré-filtro por perfil
   useEffect(() => {
@@ -197,62 +296,8 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
 
   useEffect(() => {
     if (!prefilterReady) return;
-    if (isSellerUser) return;
-    fetchSummary();
-  }, [prefilterReady, companyId, sellerId, status, fromDate, toDate, isSellerUser]);
-
-  useEffect(() => {
-    if (!prefilterReady) return;
-    fetchTimeline();
-  }, [prefilterReady, companyId, sellerId, status, fromDate, toDate, teamMembers]);
-
-  useEffect(() => {
-    // carregar opções para dropdowns
-    const headers = { Authorization: `Bearer ${accessToken}` };
-    fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, { headers })
-      .then((r) => r.json())
-      .then((data) => setCompanies(data.companies || []))
-      .catch(() => {});
-
-    if (hideSellerFilter) return;
-    fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`, { headers })
-      .then((r) => r.json())
-      .then((data) => {
-        const members = Array.isArray(data.partners) ? data.partners : [];
-        const normalize = (v: any) => (v || '').toString().trim().toLowerCase();
-        const filtered = members.filter((p: any) =>
-          ['vendedor', 'seller', 'gerente', 'manager'].includes(normalize(p?.role))
-        );
-        setTeamMembers(filtered);
-      })
-      .catch(() => {});
-  }, [accessToken]);
-
-  const fetchSummary = async () => {
-    const requestSeq = ++summaryReqSeqRef.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      if (companyId) params.set('companyId', companyId);
-      if (sellerId) params.set('sellerId', sellerId);
-      if (status) params.set('status', status);
-      if (fromDate) params.set('from', fromDate);
-      if (toDate) params.set('to', toDate);
-
-      const res = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/dashboard/summary?${params.toString()}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Erro ao carregar dashboard');
-      if (requestSeq === summaryReqSeqRef.current) setSummary(data);
-    } catch (e: any) {
-      if (requestSeq === summaryReqSeqRef.current) setError(e.message || 'Erro ao carregar dashboard');
-    } finally {
-      if (requestSeq === summaryReqSeqRef.current) setLoading(false);
-    }
-  };
+    writeDashboardFiltersToUrl({ companyId, sellerId, status, fromDate, toDate, periodPreset });
+  }, [prefilterReady, companyId, sellerId, status, fromDate, toDate, periodPreset]);
 
   const parseDate = (v: any) => {
     if (!v) return null;
@@ -410,122 +455,195 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
     };
   };
 
-  // Timeline derivada direto das avaliações (independente do summary)
-  const fetchTimeline = async () => {
-    const requestSeq = ++timelineReqSeqRef.current;
-    if (isSellerUser) {
-      setLoading(true);
-      setError(null);
-    }
-    try {
-      const headers = { Authorization: `Bearer ${accessToken}` };
-      const res = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations`, { headers });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Erro ao carregar avaliações');
-      const allEvals: any[] = data.evaluations || [];
-      let evals: any[] = [...allEvals];
+  const evaluationContext = useMemo(() => {
+    const allEvals: any[] = evaluationsQuery.data || [];
+    let evals: any[] = [...allEvals];
 
-      // filtros
-      if (companyId) evals = evals.filter((e) => e.companyId === companyId);
-      // IDs de vendedores com avaliações (não depende do sellerId para não "sumir" ao filtrar)
-      const asIdArray = (val: any) => {
-        if (!val) return [];
-        if (Array.isArray(val)) return val.map((v) => String(v)).filter(Boolean);
-        if (typeof val === 'string') return val.split(',').map((v) => v.trim()).filter(Boolean);
-        return [];
+    if (companyId) evals = evals.filter((e) => e.companyId === companyId);
+
+    const asIdArray = (val: any) => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val.map((v) => String(v)).filter(Boolean);
+      if (typeof val === 'string') return val.split(',').map((v) => v.trim()).filter(Boolean);
+      return [];
+    };
+
+    const membersForCompany = companyId
+      ? teamMembers.filter((m: any) => String(m?.companyId) === String(companyId))
+      : teamMembers;
+    const memberIndex = membersForCompany.map((m: any) => {
+      const id = String(m?.id || '').trim();
+      return {
+        id,
+        idKey: normalizeSellerToken(id),
+        nameKey: normalizeSellerToken(m?.name),
+        emailKey: normalizeSellerToken(m?.email),
+        nameWords: sellerTokenWords(m?.name),
       };
-      const membersForCompany = companyId
-        ? teamMembers.filter((m: any) => String(m?.companyId) === String(companyId))
-        : teamMembers;
-      const memberIndex = membersForCompany.map((m: any) => {
-        const id = String(m?.id || '').trim();
-        return {
-          id,
-          idKey: normalizeSellerToken(id),
-          nameKey: normalizeSellerToken(m?.name),
-          emailKey: normalizeSellerToken(m?.email),
-          nameWords: sellerTokenWords(m?.name),
-        };
+    });
+
+    const matchesMemberFromVendorToken = (
+      member: { id: string; idKey: string; nameKey: string; emailKey: string; nameWords: string[] },
+      tokenRaw: string,
+    ) => {
+      const tokenKey = normalizeSellerToken(tokenRaw);
+      if (!tokenKey) return false;
+      if (tokenKey === member.idKey || tokenKey === member.nameKey || tokenKey === member.emailKey) return true;
+      if (member.nameKey && tokenKey) {
+        const minLen = Math.min(member.nameKey.length, tokenKey.length);
+        if (minLen >= 4 && (tokenKey.includes(member.nameKey) || member.nameKey.includes(tokenKey))) return true;
+      }
+      const tokenWords = sellerTokenWords(tokenRaw);
+      if (!tokenWords.length || !member.nameWords.length) return false;
+      const tokenInMember = tokenWords.every((w) => member.nameWords.includes(w));
+      const memberInToken = member.nameWords.every((w) => tokenWords.includes(w));
+      if (!tokenInMember && !memberInToken) return false;
+      const significant = tokenWords.filter((w) => w.length >= 3);
+      return significant.length > 0;
+    };
+
+    const sellerIds = new Set<string>();
+    evals.forEach((e) => {
+      asIdArray(e?.visitData?.sellers).forEach((id) => sellerIds.add(id));
+      const vendorTokens = asIdArray(e?.visitData?.vendors);
+      if (!vendorTokens.length || !memberIndex.length) return;
+      vendorTokens.forEach((token) => {
+        const tokenRaw = String(token || '').trim();
+        if (!tokenRaw) return;
+        memberIndex.forEach((m) => {
+          if (!m.id) return;
+          if (matchesMemberFromVendorToken(m, tokenRaw)) sellerIds.add(m.id);
+        });
       });
+    });
 
-      const matchesMemberFromVendorToken = (
-        member: { id: string; idKey: string; nameKey: string; emailKey: string; nameWords: string[] },
-        tokenRaw: string,
-      ) => {
-        const tokenKey = normalizeSellerToken(tokenRaw);
-        if (!tokenKey) return false;
-        if (tokenKey === member.idKey || tokenKey === member.nameKey || tokenKey === member.emailKey) return true;
-        if (member.nameKey && tokenKey) {
-          const minLen = Math.min(member.nameKey.length, tokenKey.length);
-          if (minLen >= 4 && (tokenKey.includes(member.nameKey) || member.nameKey.includes(tokenKey))) return true;
-        }
-        const tokenWords = sellerTokenWords(tokenRaw);
-        if (!tokenWords.length || !member.nameWords.length) return false;
-        const tokenInMember = tokenWords.every((w) => member.nameWords.includes(w));
-        const memberInToken = member.nameWords.every((w) => tokenWords.includes(w));
-        if (!tokenInMember && !memberInToken) return false;
-        const significant = tokenWords.filter((w) => w.length >= 3);
-        return significant.length > 0;
-      };
-
-      const sellerIds = new Set<string>();
-      evals.forEach((e) => {
-        asIdArray(e?.visitData?.sellers).forEach((id) => sellerIds.add(id));
+    let filteredEvals: any[] = [...evals];
+    if (sellerId) {
+      const selectedMember = memberIndex.find((m) => String(m.id) === String(sellerId));
+      const fallbackMember = hideSellerFilter
+        ? {
+            id: String(sellerId),
+            idKey: normalizeSellerToken(sellerId),
+            nameKey: normalizeSellerToken(user?.name),
+            emailKey: normalizeSellerToken(user?.email),
+            nameWords: sellerTokenWords(user?.name),
+          }
+        : null;
+      const memberToMatch = selectedMember || fallbackMember;
+      filteredEvals = filteredEvals.filter((e) => {
+        const sellers = asIdArray(e?.visitData?.sellers);
+        if (sellers.includes(String(sellerId))) return true;
         const vendorTokens = asIdArray(e?.visitData?.vendors);
-        if (!vendorTokens.length || !memberIndex.length) return;
-        vendorTokens.forEach((token) => {
-          const tokenRaw = String(token || '').trim();
-          if (!tokenRaw) return;
-          memberIndex.forEach((m) => {
-            if (!m.id) return;
-            if (matchesMemberFromVendorToken(m, tokenRaw)) sellerIds.add(m.id);
-          });
-        });
+        if (!vendorTokens.length || !memberToMatch) return false;
+        return vendorTokens.some((t) => matchesMemberFromVendorToken(memberToMatch, String(t || '')));
       });
+    }
 
-      if (requestSeq !== timelineReqSeqRef.current) return;
-      setSellerIdsWithEvaluations(Array.from(sellerIds));
-      if (sellerId) {
-        const selectedMember = memberIndex.find((m) => String(m.id) === String(sellerId));
-        const fallbackMember = hideSellerFilter
-          ? {
-              id: String(sellerId),
-              idKey: normalizeSellerToken(sellerId),
-              nameKey: normalizeSellerToken(user?.name),
-              emailKey: normalizeSellerToken(user?.email),
-              nameWords: sellerTokenWords(user?.name),
-            }
-          : null;
-        const memberToMatch = selectedMember || fallbackMember;
-        evals = evals.filter((e) => {
-          const sellers = asIdArray(e?.visitData?.sellers);
-          if (sellers.includes(String(sellerId))) return true;
-          const vendorTokens = asIdArray(e?.visitData?.vendors);
-          if (!vendorTokens.length || !memberToMatch) return false;
-          return vendorTokens.some((t) => matchesMemberFromVendorToken(memberToMatch, String(t || '')));
-        });
+    if (status === 'completed') filteredEvals = filteredEvals.filter((e) => e.status === 'completed');
+    if (status === 'scheduled') filteredEvals = filteredEvals.filter((e) => e.status !== 'completed');
+
+    const fromD = fromDate ? parseDate(fromDate) : null;
+    const toD = toDate ? parseDate(toDate) : null;
+    filteredEvals = filteredEvals.filter((e) => {
+      const d = parseDate(e.scheduledDate) || parseDate(e.createdAt);
+      if (!d) return false;
+      if (fromD && d < fromD) return false;
+      if (toD && d > toD) return false;
+      return true;
+    });
+
+    return { sellerIdsWithEvaluations: Array.from(sellerIds), filteredEvaluations: filteredEvals };
+  }, [companyId, evaluationsQuery.data, fromDate, hideSellerFilter, sellerId, status, teamMembers, toDate, user?.email, user?.name]);
+
+  const sellerIdsWithEvaluations = evaluationContext.sellerIdsWithEvaluations;
+  const filteredEvaluations = evaluationContext.filteredEvaluations;
+
+  const summary = useMemo<Summary | null>(() => {
+    if (isSellerUser) {
+      if (!evaluationsQuery.data) return null;
+      return buildSummaryFromEvaluations(filteredEvaluations);
+    }
+    return summaryQuery.data || null;
+  }, [filteredEvaluations, isSellerUser, evaluationsQuery.data, summaryQuery.data]);
+
+  const timelineData = useMemo(() => {
+    const completedWithAi = filteredEvaluations.filter((e) => e.status === 'completed' && e.aiAnalysis);
+    const dated = completedWithAi
+      .map((e) => ({
+        e,
+        d: parseDate(e.scheduledDate) || parseDate(e.createdAt),
+      }))
+      .filter((item) => item.d);
+
+    const groups: Record<string, { d: Date; overall: number[]; servir: number[]; gold: number[] }> = {};
+    dated.forEach(({ e, d }) => {
+      if (!d) return;
+      const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (!groups[ymd]) groups[ymd] = { d: d, overall: [], servir: [], gold: [] };
+      const ai = e.aiAnalysis || {};
+      if (typeof ai.overallScore === 'number') {
+        const val = ai.overallScore <= 10 ? ai.overallScore * 10 : ai.overallScore;
+        groups[ymd].overall.push(val);
       }
-      if (status === 'completed') evals = evals.filter((e) => e.status === 'completed');
-      if (status === 'scheduled') evals = evals.filter((e) => e.status !== 'completed');
-      const fromD = fromDate ? parseDate(fromDate) : null;
-      const toD = toDate ? parseDate(toDate) : null;
-      evals = evals.filter((e) => {
-        const d = parseDate(e.scheduledDate) || parseDate(e.createdAt);
-        if (!d) return false;
-        if (fromD && d < fromD) return false;
-        if (toD && d > toD) return false;
-        return true;
-      });
+      if (typeof ai.servirAvg === 'number') groups[ymd].servir.push(ai.servirAvg);
+      if (typeof ai.goldAvg === 'number') groups[ymd].gold.push(ai.goldAvg);
+    });
 
-      if (isSellerUser) {
-        if (requestSeq !== timelineReqSeqRef.current) return;
-        setSummary(buildSummaryFromEvaluations(evals));
-        setLoading(false);
-      }
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+    let timeline = Object.entries(groups)
+      .map(([key, vals]) => ({
+        date: key,
+        label: vals.d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
+        overall: avg(vals.overall),
+        servir: avg(vals.servir),
+        gold: avg(vals.gold),
+      }))
+      .filter((t) => t.overall !== null || t.servir !== null || t.gold !== null)
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-      // NPS = %Promotores − %Detratores (promotores: 9–10; detratores: 0–6)
-      // Prioriza aiAnalysis.npsScore; fallback usa surveyData + metadados do survey.
-      const completedEvals = evals.filter((e) => e.status === 'completed');
+    if (timeline.length === 0 && completedWithAi.length > 0) {
+      timeline = completedWithAi
+        .map((e, idx) => {
+          const ai = e.aiAnalysis || {};
+          const overall =
+            typeof ai.overallScore === 'number'
+              ? ai.overallScore <= 10
+                ? ai.overallScore * 10
+                : ai.overallScore
+              : null;
+          const servir = typeof ai.servirAvg === 'number' ? ai.servirAvg : null;
+          const gold = typeof ai.goldAvg === 'number' ? ai.goldAvg : null;
+          if (overall === null && servir === null && gold === null) return null;
+          return {
+            date: e.scheduledDate || e.createdAt || `Ponto-${idx + 1}`,
+            label: `P${idx + 1}`,
+            overall,
+            servir,
+            gold,
+          };
+        })
+        .filter(Boolean) as any[];
+    }
+
+    return timeline;
+  }, [filteredEvaluations]);
+
+  useEffect(() => {
+    if (!prefilterReady) return;
+    if (!evaluationsQuery.data) {
+      setComputedNps(null);
+      return;
+    }
+    const completedEvals = filteredEvaluations.filter((e) => e.status === 'completed');
+    if (!completedEvals.length) {
+      setComputedNps(null);
+      return;
+    }
+
+    let cancelled = false;
+    const headers = { Authorization: `Bearer ${accessToken}` };
+
+    const run = async () => {
       const surveyIdsNeedingLookup = Array.from(
         new Set(
           completedEvals
@@ -538,16 +656,20 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
         await Promise.all(
           surveyIdsNeedingLookup.map(async (surveyId) => {
             try {
-              const sRes = await fetch(
-                `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/surveys/${surveyId}`,
-                { headers }
-              );
-              const sData = await sRes.json();
-              if (!sRes.ok) {
-                npsQuestionIdsBySurveyRef.current.set(surveyId, []);
-                return;
-              }
-              npsQuestionIdsBySurveyRef.current.set(surveyId, extractNpsQuestionIdsFromSurvey(sData));
+              const payload = await queryClient.fetchQuery({
+                queryKey: ['survey', surveyId],
+                queryFn: async () => {
+                  const sRes = await fetch(
+                    `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/surveys/${surveyId}`,
+                    { headers }
+                  );
+                  const sData = await sRes.json();
+                  if (!sRes.ok) throw new Error(sData?.error || 'Erro ao carregar survey');
+                  return sData;
+                },
+                staleTime: 24 * 60 * 60_000,
+              });
+              npsQuestionIdsBySurveyRef.current.set(surveyId, extractNpsQuestionIdsFromSurvey(payload));
             } catch {
               npsQuestionIdsBySurveyRef.current.set(surveyId, []);
             }
@@ -555,6 +677,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
         );
       }
 
+      if (cancelled) return;
       const npsRatings: number[] = [];
       completedEvals.forEach((e) => {
         const fromAi = normalizeNpsRating0to10(e?.aiAnalysis?.npsScore);
@@ -575,151 +698,53 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
         const rating = normalizeNpsRating0to10(avg);
         if (rating != null) npsRatings.push(rating);
       });
-      if (requestSeq !== timelineReqSeqRef.current) return;
+
+      if (cancelled) return;
       setComputedNps(computeNps(npsRatings));
-
-      const completedWithAi = evals.filter((e) => e.status === 'completed' && e.aiAnalysis);
-      const completedWithoutAi = evals.filter((e) => e.status === 'completed' && !e.aiAnalysis).length;
-
-      const dated = completedWithAi
-        .map((e) => ({
-          e,
-          d: parseDate(e.scheduledDate) || parseDate(e.createdAt),
-        }))
-        .filter((item) => item.d);
-
-      const groups: Record<string, { d: Date; overall: number[]; servir: number[]; gold: number[] }> = {};
-      dated.forEach(({ e, d }) => {
-        if (!d) return;
-        const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        if (!groups[ymd]) groups[ymd] = { d: d, overall: [], servir: [], gold: [] };
-        const ai = e.aiAnalysis || {};
-        // overallScore pode vir em 0-10 ou 0-100; normaliza para 0-100
-        if (typeof ai.overallScore === 'number') {
-          const val = ai.overallScore <= 10 ? ai.overallScore * 10 : ai.overallScore;
-          groups[ymd].overall.push(val);
-        }
-        if (typeof ai.servirAvg === 'number') groups[ymd].servir.push(ai.servirAvg);
-        if (typeof ai.goldAvg === 'number') groups[ymd].gold.push(ai.goldAvg);
-      });
-
-      const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
-      let timeline = Object.entries(groups)
-        .map(([key, vals]) => ({
-          date: key,
-          label: vals.d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
-          overall: avg(vals.overall),
-          servir: avg(vals.servir),
-          gold: avg(vals.gold),
-        }))
-        .filter((t) => t.overall !== null || t.servir !== null || t.gold !== null)
-        .sort((a, b) => (a.date < b.date ? -1 : 1));
-
-      // Fallback: se temos avaliações concluídas mas nenhuma data parseável, gera pontos indexados
-      if (timeline.length === 0 && completedWithAi.length > 0) {
-        timeline = completedWithAi
-          .map((e, idx) => {
-            const ai = e.aiAnalysis || {};
-            const overall =
-              typeof ai.overallScore === 'number'
-                ? ai.overallScore <= 10
-                  ? ai.overallScore * 10
-                  : ai.overallScore
-                : null;
-            const servir = typeof ai.servirAvg === 'number' ? ai.servirAvg : null;
-            const gold = typeof ai.goldAvg === 'number' ? ai.goldAvg : null;
-            if (overall === null && servir === null && gold === null) return null;
-            return {
-              date: e.scheduledDate || e.createdAt || `Ponto-${idx + 1}`,
-              label: `P${idx + 1}`,
-              overall,
-              servir,
-              gold,
-            };
-          })
-          .filter(Boolean) as any[];
-      }
-
-      if (requestSeq !== timelineReqSeqRef.current) return;
-      setTimelineData(timeline);
-      setTimelineDebug({
-        total: allEvals.length,
-        afterFilters: evals.length,
-        completedWithAi: completedWithAi.length,
-        missingAi: completedWithoutAi,
-        withValidDate: dated.length,
-        missingDate: completedWithAi.length - dated.length,
-      });
-      if (timeline.length === 0) {
-        console.debug('[dashboard] timeline vazio', {
-          total: allEvals.length,
-          afterFilters: evals.length,
-          completedWithAi: completedWithAi.length,
-          completedWithoutAi,
-          validDates: dated.length,
-        });
-      }
-    } catch (err) {
-      console.error('Erro ao montar timeline:', err);
-      if (requestSeq !== timelineReqSeqRef.current) return;
-      if (isSellerUser) {
-        setSummary(null);
-        setError('Erro ao carregar dashboard');
-        setLoading(false);
-      }
-      setTimelineData([]);
-      setTimelineDebug(null);
-      setComputedNps(null);
-      setSellerIdsWithEvaluations([]);
-    }
-  };
-
-  // Fallback: se timelineData estiver vazio, tenta derivar de summary.recentEvaluations
-  useEffect(() => {
-    if (timelineData.length > 0) return;
-    if (!summary || !summary.recentEvaluations) return;
-
-    const parseDate = (v: any) => {
-      if (!v) return null;
-      const d1 = new Date(v);
-      if (!isNaN(d1.getTime())) return d1;
-      const [dp] = String(v).split(/[ T]/);
-      const m = dp.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
-      if (m) {
-        const iso = `${m[3]}-${m[2]}-${m[1]}`;
-        const d2 = new Date(iso);
-        if (!isNaN(d2.getTime())) return d2;
-      }
-      return null;
     };
 
-    const group: Record<string, { d: Date; overall: number[]; servir: number[]; gold: number[] }> = {};
-    summary.recentEvaluations.forEach((e) => {
-      const d = parseDate(e.scheduledDate);
-      if (!d) return;
-      const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      if (!group[ymd]) group[ymd] = { d: d, overall: [], servir: [], gold: [] };
-      if (typeof e.overall === 'number') {
-        const val = e.overall <= 10 ? e.overall * 10 : e.overall;
-        group[ymd].overall.push(val);
-      }
-      if (typeof e.servir === 'number') group[ymd].servir.push(e.servir);
-      if (typeof e.gold === 'number') group[ymd].gold.push(e.gold);
+    run().catch(() => {
+      if (!cancelled) setComputedNps(null);
     });
-    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
-    const timeline = Object.entries(group)
-      .map(([key, vals]) => ({
-        date: key,
-        label: vals.d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
-        overall: avg(vals.overall),
-        servir: avg(vals.servir),
-        gold: avg(vals.gold),
-      }))
-      .filter((t) => t.overall !== null || t.servir !== null || t.gold !== null)
-      .sort((a, b) => (a.date < b.date ? -1 : 1));
 
-    if (timeline.length > 0) setTimelineData(timeline);
-  }, [timelineData.length, summary]);
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, filteredEvaluations, prefilterReady, queryClient]);
+
+  const overallScore100 =
+    summary?.averages.overall != null ? Number((summary.averages.overall * 10).toFixed(0)) : null;
+  const OverallScoreIcon =
+    overallScore100 != null && overallScore100 >= 80
+      ? Trophy
+      : overallScore100 != null && overallScore100 >= 60
+        ? Medal
+        : null;
+
+  const NpsIcon =
+    computedNps == null
+      ? null
+      : computedNps < 0
+        ? ThumbsDown
+        : computedNps >= 70
+          ? Crown
+          : computedNps > 50
+            ? Sparkles
+            : computedNps > 20
+              ? CheckCircle
+              : computedNps > 0
+                ? ThumbsUp
+                : null;
+
+  const error =
+    (!isSellerUser && summaryQuery.isError
+      ? ((summaryQuery.error as any)?.message || 'Erro ao carregar dashboard')
+      : null) ||
+    (isSellerUser && evaluationsQuery.isError
+      ? ((evaluationsQuery.error as any)?.message || 'Erro ao carregar dashboard')
+      : null);
+
+  const loading = !summary && ((isSellerUser && evaluationsQuery.isPending) || (!isSellerUser && summaryQuery.isPending));
 
   const sellerOptions = useMemo(() => {
     const ids = new Set(sellerIdsWithEvaluations.map((id) => String(id)));
@@ -731,6 +756,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
   useEffect(() => {
     if (hideSellerFilter) return;
     if (!sellerId) return;
+    if (sellerIdsWithEvaluations.length === 0) return;
     const ids = new Set(sellerIdsWithEvaluations.map((id) => String(id)));
     if (!ids.has(String(sellerId))) {
       setSellerId('');

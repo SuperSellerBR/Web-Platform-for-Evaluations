@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layout } from './Layout';
 import {
   BrainCog,
@@ -19,6 +20,13 @@ import { projectId } from '../utils/supabase/info';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { formatFullName } from '../utils/name';
 import { useTheme } from '../utils/theme';
+import {
+  encodeStringArrayParam,
+  readEnumParam,
+  readStringArrayParam,
+  readTrimmedStringParam,
+  writeQueryParamsPatch,
+} from '../utils/urlQuery';
 
 interface EvaluationsPageProps {
   user: any;
@@ -57,22 +65,46 @@ function StatusIconButton(props: { done: boolean; aria: string; tooltip: string;
   );
 }
 
+const EVALUATIONS_QUERY_KEYS = {
+  search: 'evals_q',
+  company: 'evals_company',
+  from: 'evals_from',
+  to: 'evals_to',
+  period: 'evals_period',
+  statuses: 'evals_statuses',
+} as const;
+
+const PERIOD_PRESETS = ['all', 'last1w', 'last4w', 'custom'] as const;
+const ALL_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled'] as const;
+
 export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: EvaluationsPageProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
+  const queryClient = useQueryClient();
 
-  const [evaluations, setEvaluations] = useState<any[]>([]);
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [evaluators, setEvaluators] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [companyId, setCompanyId] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [periodPreset, setPeriodPreset] = useState<'all' | 'last1w' | 'last4w' | 'custom'>('all');
-  const ALL_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled'] as const;
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([...ALL_STATUSES]);
+  const initialUrlState = useMemo(() => {
+    const searchTerm = readTrimmedStringParam(EVALUATIONS_QUERY_KEYS.search);
+    const companyId = readTrimmedStringParam(EVALUATIONS_QUERY_KEYS.company);
+    const fromDate = readTrimmedStringParam(EVALUATIONS_QUERY_KEYS.from);
+    const toDate = readTrimmedStringParam(EVALUATIONS_QUERY_KEYS.to);
+    const presetFromUrl = readEnumParam(EVALUATIONS_QUERY_KEYS.period, PERIOD_PRESETS, 'all');
+    const statusesFromUrl = readStringArrayParam(EVALUATIONS_QUERY_KEYS.statuses).filter((s) =>
+      (ALL_STATUSES as readonly string[]).includes(s),
+    );
+    const selectedStatuses = statusesFromUrl.length ? statusesFromUrl : [...ALL_STATUSES];
+    const periodPreset: (typeof PERIOD_PRESETS)[number] =
+      (fromDate || toDate) && presetFromUrl === 'all' ? 'custom' : presetFromUrl;
+
+    return { searchTerm, companyId, fromDate, toDate, periodPreset, selectedStatuses };
+  }, []);
+
+  const [searchTerm, setSearchTerm] = useState(initialUrlState.searchTerm);
+  const [companyId, setCompanyId] = useState(initialUrlState.companyId);
+  const [fromDate, setFromDate] = useState(initialUrlState.fromDate);
+  const [toDate, setToDate] = useState(initialUrlState.toDate);
+  const [periodPreset, setPeriodPreset] = useState<(typeof PERIOD_PRESETS)[number]>(initialUrlState.periodPreset);
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(initialUrlState.selectedStatuses);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
@@ -81,6 +113,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
   const [editingEvaluation, setEditingEvaluation] = useState<any | null>(null);
   const [companyMembers, setCompanyMembers] = useState<any[]>([]);
   const [selectedSellerId, setSelectedSellerId] = useState<string>('');
+  const [prefilterReady, setPrefilterReady] = useState(false);
 
   const role =
     (user?.role || user?.user_metadata?.role || user?.app_metadata?.role || '').toString().trim().toLowerCase();
@@ -99,47 +132,90 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
     role === 'partner';
 
   useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    if (!hideCompanyFilter) return;
-    setCompanyId((user?.companyId || '').toString());
+    if (hideCompanyFilter) setCompanyId((user?.companyId || '').toString());
+    setPrefilterReady(true);
   }, [hideCompanyFilter, user?.companyId]);
 
-  const loadData = async () => {
-    try {
-      const headers = { 'Authorization': `Bearer ${accessToken}` };
+  useEffect(() => {
+    if (!prefilterReady) return;
+    writeQueryParamsPatch({
+      [EVALUATIONS_QUERY_KEYS.search]: searchTerm || null,
+      [EVALUATIONS_QUERY_KEYS.company]: companyId || null,
+      [EVALUATIONS_QUERY_KEYS.from]: fromDate || null,
+      [EVALUATIONS_QUERY_KEYS.to]: toDate || null,
+      [EVALUATIONS_QUERY_KEYS.period]: periodPreset !== 'all' ? periodPreset : null,
+      [EVALUATIONS_QUERY_KEYS.statuses]:
+        isPartnerPortalRole || selectedStatuses.length >= ALL_STATUSES.length
+          ? null
+          : encodeStringArrayParam(selectedStatuses),
+    });
+  }, [companyId, fromDate, isPartnerPortalRole, periodPreset, prefilterReady, searchTerm, selectedStatuses, toDate]);
 
-      const [evaluationsRes, companiesRes, evaluatorsRes] = await Promise.all([
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations`, { headers }),
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, { headers }),
-        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators`, { headers }),
-      ]);
+  const companiesQuery = useQuery<any[]>({
+    queryKey: ['companies', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar empresas');
+      return Array.isArray(data.companies) ? data.companies : [];
+    },
+  });
+  const companies = companiesQuery.data || [];
 
-      const evaluationsData = await evaluationsRes.json();
-      const companiesData = await companiesRes.json();
-      const evaluatorsData = await evaluatorsRes.json();
+  const evaluatorsQuery = useQuery<any[]>({
+    queryKey: ['evaluators', accessToken],
+    enabled: !!accessToken,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar avaliadores');
+      return Array.isArray(data.evaluators) ? data.evaluators : [];
+    },
+  });
+  const evaluators = evaluatorsQuery.data || [];
 
-      setEvaluations(evaluationsData.evaluations || []);
-      setCompanies(companiesData.companies || []);
-      setEvaluators(evaluatorsData.evaluators || []);
-      setSelectedIds([]);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const evaluationsQuery = useQuery<any[]>({
+    queryKey: ['evaluations', accessToken, companyId || 'all'],
+    enabled: !!accessToken && prefilterReady,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (companyId) params.set('companyId', companyId);
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations${params.toString() ? `?${params.toString()}` : ''}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || 'Erro ao carregar avaliações');
+      return Array.isArray(data.evaluations) ? data.evaluations : [];
+    },
+  });
+  const evaluations = evaluationsQuery.data || [];
+
+  const loading = !prefilterReady || (evaluationsQuery.isPending && evaluations.length === 0);
+  const pageError =
+    evaluationsQuery.isError && evaluations.length === 0
+      ? ((evaluationsQuery.error as any)?.message || 'Erro ao carregar avaliações')
+      : '';
+
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [evaluations]);
 
   const getCompanyName = (companyId: string) => {
     const company = companies.find(c => c.id === companyId);
-    return company?.name || 'N/A';
+    return company?.name || companyId || 'N/A';
   };
 
   const getEvaluatorName = (evaluatorId: string) => {
     const evaluator = evaluators.find(e => e.id === evaluatorId);
-    return formatFullName(evaluator?.name, (evaluator as any)?.lastName) || 'N/A';
+    return formatFullName(evaluator?.name, (evaluator as any)?.lastName) || evaluatorId || 'N/A';
   };
 
   const getSellerLabel = (evaluation: any) => {
@@ -318,9 +394,13 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
         }),
       );
       // Remoção otimista no front; loadData mantém consistência
-      setEvaluations((prev) => prev.filter((e) => !results.includes(e.id)));
       setSelectedIds([]);
-      loadData();
+      queryClient.setQueriesData({ queryKey: ['evaluations'] }, (prev: unknown) => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.filter((e: any) => !results.includes(e?.id));
+      });
+      queryClient.invalidateQueries({ queryKey: ['evaluations'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
     } catch (err) {
       console.error('Error deleting evaluations:', err);
       alert((err as Error).message || 'Erro ao excluir avaliações. Verifique permissões ou tente novamente.');
@@ -351,11 +431,18 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
     try {
       const headers = { Authorization: `Bearer ${accessToken}` };
-      const res = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`, { headers });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Erro ao carregar equipe');
-
-      const allMembers = Array.isArray(data.partners) ? data.partners : [];
+      const allMembers = await queryClient.fetchQuery<any[]>({
+        queryKey: ['partners', accessToken],
+        queryFn: async () => {
+          const res = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`, {
+            headers,
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data?.error || 'Erro ao carregar equipe');
+          return Array.isArray(data.partners) ? data.partners : [];
+        },
+        staleTime: 5 * 60_000,
+      });
       const members = allMembers
         .filter((p: any) => p?.companyId === evaluation.companyId)
         .filter((p: any) => isTeamMemberRole(p?.role));
@@ -404,7 +491,12 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
       if (!res.ok) throw new Error(data?.error || 'Erro ao atualizar vendedor avaliado');
       const updatedEval = data?.evaluation;
       if (updatedEval?.id) {
-        setEvaluations((prev) => prev.map((e) => (e.id === updatedEval.id ? updatedEval : e)));
+        queryClient.setQueriesData({ queryKey: ['evaluations'] }, (prev: unknown) => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map((e: any) => (e?.id === updatedEval.id ? updatedEval : e));
+        });
+        queryClient.invalidateQueries({ queryKey: ['evaluations'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       }
       closeEditModal();
     } catch (err) {
@@ -417,10 +509,10 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
   return (
     <Layout user={user} currentPage="evaluations" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className={`max-w-7xl mx-auto ${isDark ? 'evaluation-dark' : ''}`}>
-        <div className="mb-6 sm:mb-8">
-          <h2 className="text-foreground mb-2">Avaliações</h2>
-          <p className="text-muted-foreground">Gerencie todas as avaliações agendadas e concluídas</p>
+        <div className={`max-w-7xl mx-auto ${isDark ? 'evaluation-dark' : ''}`}>
+          <div className="mb-6 sm:mb-8">
+            <h2 className="text-foreground mb-2">Avaliações</h2>
+            <p className="text-muted-foreground">Gerencie todas as avaliações agendadas e concluídas</p>
           <div className="mt-3 flex items-center gap-3">
             <button
               type="button"
@@ -679,7 +771,24 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
           )}
         </div>
 
-        {loading ? (
+        {pageError ? (
+          <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-md">
+            <ClipboardList className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Não foi possível carregar</h3>
+            <p className="text-muted-foreground mb-6">{pageError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                evaluationsQuery.refetch();
+                companiesQuery.refetch();
+                evaluatorsQuery.refetch();
+              }}
+              className="bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:opacity-90 transition-colors w-full sm:w-auto"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
@@ -910,8 +1019,8 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 	                  </div>
 	              );
 	            })}
-	          </div>
-	        )}
+          </div>
+        )}
 
         {editOpen && (
           <div
@@ -1007,7 +1116,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
         )}
 
         {/* Summary */}
-        {!loading && evaluations.length > 0 && (
+        {!loading && !pageError && evaluations.length > 0 && (
           <div className="mt-6 bg-card border border-border rounded-lg shadow-md p-4 sm:p-6">
             <h3 className="text-foreground mb-4">Resumo</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
