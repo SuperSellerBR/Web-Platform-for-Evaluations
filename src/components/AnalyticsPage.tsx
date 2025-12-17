@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Layout } from './Layout';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
 import { TrendingUp, TrendingDown, Award } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from './ui/chart';
+import { useTheme } from '../utils/theme';
 
 interface AnalyticsPageProps {
   user: any;
@@ -16,6 +18,8 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
   const [selectedCompany, setSelectedCompany] = useState<string>('');
   const [analytics, setAnalytics] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
 
   useEffect(() => {
     loadCompanies();
@@ -67,10 +71,10 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
     return (
       <Layout user={user} currentPage="analytics" onNavigate={onNavigate} onLogout={onLogout}>
         <div className="max-w-7xl mx-auto">
-          <div className="text-center py-12 bg-white rounded-lg shadow-md">
-            <TrendingUp className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-gray-900 mb-2">Nenhuma empresa cadastrada</h3>
-            <p className="text-gray-600 mb-6">
+          <div className="text-center py-12 bg-card text-card-foreground rounded-lg border border-border shadow-sm">
+            <TrendingUp className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Nenhuma empresa cadastrada</h3>
+            <p className="text-muted-foreground mb-6">
               Cadastre empresas e realize avaliações para ver os relatórios
             </p>
             <button
@@ -100,7 +104,22 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
     { name: 'Pendentes', value: (analytics?.totalEvaluations || 0) - (analytics?.completedCount || 0) },
   ];
 
-  const COLORS = ['#10b981', '#f59e0b'];
+  const COLORS = ['var(--color-chart-2)', 'var(--color-chart-4)'];
+  const renderStatusLabel = ({ x, y, cx, name, percent }: any) => {
+    const textAnchor = x > cx ? 'start' : 'end';
+    return (
+      <text
+        x={x}
+        y={y}
+        fill="var(--color-foreground)"
+        textAnchor={textAnchor}
+        dominantBaseline="central"
+        style={{ fontSize: 12 }}
+      >
+        {`${name}: ${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
 
   // Calculate trends
   const completionRate = analytics?.totalEvaluations > 0
@@ -109,19 +128,19 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
 
   return (
     <Layout user={user} currentPage="analytics" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="max-w-7xl mx-auto">
+      <div className={`max-w-7xl mx-auto text-foreground ${isDark ? 'evaluation-dark' : ''}`}>
         <div className="mb-6 sm:mb-8">
-          <h2 className="text-gray-900 mb-2">Relatórios e Análises</h2>
-          <p className="text-gray-600">Visualize os resultados das avaliações</p>
+          <h2 className="text-foreground mb-2">Relatórios e Análises</h2>
+          <p className="text-muted-foreground">Visualize os resultados das avaliações</p>
         </div>
 
         {/* Company Selector */}
-        <div className="mb-6 bg-white rounded-lg shadow-md p-4">
-          <label className="block text-gray-700 mb-2">Selecione a Empresa</label>
+        <div className="mb-6 bg-card text-card-foreground rounded-lg border border-border p-4 shadow-sm">
+          <label className="block text-muted-foreground mb-2">Selecione a Empresa</label>
           <select
             value={selectedCompany}
             onChange={(e) => setSelectedCompany(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
           >
             {companies.map(company => (
               <option key={company.id} value={company.id}>
@@ -133,48 +152,48 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
         ) : analytics && analytics.totalEvaluations > 0 ? (
           <div className="space-y-6">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 sm:gap-6">
-              <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+              <div className="bg-card text-card-foreground rounded-lg border border-border shadow-sm p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-600">Total de Avaliações</p>
+                  <p className="text-muted-foreground">Total de Avaliações</p>
                   <TrendingUp className="w-5 h-5 text-blue-600" />
                 </div>
-                <p className="text-2xl sm:text-3xl text-gray-900">{analytics.totalEvaluations}</p>
+                <p className="text-2xl sm:text-3xl text-foreground">{analytics.totalEvaluations}</p>
               </div>
 
-              <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+              <div className="bg-card text-card-foreground rounded-lg border border-border shadow-sm p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-600">Concluídas</p>
+                  <p className="text-muted-foreground">Concluídas</p>
                   <Award className="w-5 h-5 text-green-600" />
                 </div>
-                <p className="text-2xl sm:text-3xl text-gray-900">{analytics.completedCount}</p>
-                <p className="text-sm text-green-600 mt-1">
+                <p className="text-2xl sm:text-3xl text-foreground">{analytics.completedCount}</p>
+                <p className="text-sm text-green-600 dark:text-green-400 mt-1">
                   {completionRate}% de taxa de conclusão
                 </p>
               </div>
 
-              <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+              <div className="bg-card text-card-foreground rounded-lg border border-border shadow-sm p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-600">Avaliação Média</p>
+                  <p className="text-muted-foreground">Avaliação Média</p>
                   <TrendingUp className="w-5 h-5 text-purple-600" />
                 </div>
-                <p className="text-2xl sm:text-3xl text-gray-900">
+                <p className="text-2xl sm:text-3xl text-foreground">
                   {analytics.averageManagerRating?.toFixed(1) || '0.0'}
                 </p>
-                <p className="text-sm text-gray-600 mt-1">de 5.0</p>
+                <p className="text-sm text-muted-foreground mt-1">de 5.0</p>
               </div>
 
-              <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+              <div className="bg-card text-card-foreground rounded-lg border border-border shadow-sm p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-600">Pendentes</p>
+                  <p className="text-muted-foreground">Pendentes</p>
                   <TrendingDown className="w-5 h-5 text-orange-600" />
                 </div>
-                <p className="text-2xl sm:text-3xl text-gray-900">
+                <p className="text-2xl sm:text-3xl text-foreground">
                   {analytics.totalEvaluations - analytics.completedCount}
                 </p>
               </div>
@@ -184,31 +203,31 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
               {/* Period Distribution */}
               {periodData.length > 0 && (
-                <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
-                  <h3 className="text-gray-900 mb-4">Distribuição por Período</h3>
-                  <ResponsiveContainer width="100%" height={300}>
+                <div className="bg-card text-card-foreground rounded-lg border border-border shadow-sm p-4 sm:p-6">
+                  <h3 className="text-foreground mb-4">Distribuição por Período</h3>
+                  <ChartContainer config={{}} className="h-[300px] w-full aspect-auto">
                     <BarChart data={periodData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="period" />
                       <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="avaliações" fill="#3b82f6" />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Bar dataKey="avaliações" fill="var(--color-chart-1)" radius={[4, 4, 0, 0]} />
                     </BarChart>
-                  </ResponsiveContainer>
+                  </ChartContainer>
                 </div>
               )}
 
               {/* Status Distribution */}
-              <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
-                <h3 className="text-gray-900 mb-4">Status das Avaliações</h3>
-                <ResponsiveContainer width="100%" height={300}>
+              <div className="bg-card text-card-foreground rounded-lg border border-border shadow-sm p-4 sm:p-6">
+                <h3 className="text-foreground mb-4">Status das Avaliações</h3>
+                <ChartContainer config={{}} className="h-[300px] w-full aspect-auto">
                   <PieChart>
                     <Pie
                       data={statusData}
                       cx="50%"
                       cy="50%"
                       labelLine={false}
-                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                      label={renderStatusLabel}
                       outerRadius={80}
                       fill="#8884d8"
                       dataKey="value"
@@ -217,57 +236,57 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <ChartTooltip content={<ChartTooltipContent />} />
                   </PieChart>
-                </ResponsiveContainer>
+                </ChartContainer>
               </div>
             </div>
 
             {/* Recent Evaluations */}
             {analytics.evaluations && analytics.evaluations.length > 0 && (
-              <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
-                <h3 className="text-gray-900 mb-4">Avaliações Recentes</h3>
+              <div className="bg-card text-card-foreground rounded-lg border border-border shadow-sm p-4 sm:p-6">
+                <h3 className="text-foreground mb-4">Avaliações Recentes</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="text-left py-3 px-4 text-gray-700">Data</th>
-                        <th className="text-left py-3 px-4 text-gray-700">Período</th>
-                        <th className="text-left py-3 px-4 text-gray-700">Voucher</th>
-                        <th className="text-left py-3 px-4 text-gray-700">Avaliação</th>
-                        <th className="text-left py-3 px-4 text-gray-700">Status</th>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-3 px-4 text-muted-foreground">Data</th>
+                        <th className="text-left py-3 px-4 text-muted-foreground">Período</th>
+                        <th className="text-left py-3 px-4 text-muted-foreground">Voucher</th>
+                        <th className="text-left py-3 px-4 text-muted-foreground">Avaliação</th>
+                        <th className="text-left py-3 px-4 text-muted-foreground">Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {analytics.evaluations.slice(0, 10).map((evaluation: any) => (
-                        <tr key={evaluation.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4 text-gray-700">
+                        <tr key={evaluation.id} className="border-b border-border hover:bg-muted transition-colors">
+                          <td className="py-3 px-4 text-foreground">
                             {new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR')}
                           </td>
-                          <td className="py-3 px-4 text-gray-700 capitalize">
+                          <td className="py-3 px-4 text-foreground capitalize">
                             {evaluation.period}
                           </td>
-                          <td className="py-3 px-4 text-gray-700 font-mono">
+                          <td className="py-3 px-4 text-foreground font-mono">
                             {evaluation.voucherCode}
                           </td>
-                          <td className="py-3 px-4 text-gray-700">
+                          <td className="py-3 px-4 text-foreground">
                             {evaluation.managerRating ? (
                               <span>{evaluation.managerRating}/5 ⭐</span>
                             ) : (
-                              <span className="text-gray-400">-</span>
+                              <span className="text-muted-foreground">-</span>
                             )}
                           </td>
                           <td className="py-3 px-4">
                             {evaluation.status === 'completed' ? (
-                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-sm">
+                              <span className="px-2 py-1 bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-100 rounded-full text-sm">
                                 Concluída
                               </span>
                             ) : evaluation.status === 'in_progress' ? (
-                              <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm">
+                              <span className="px-2 py-1 bg-yellow-100 text-yellow-800 dark:bg-yellow-500/15 dark:text-yellow-100 rounded-full text-sm">
                                 Em Andamento
                               </span>
                             ) : (
-                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+                              <span className="px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-500/15 dark:text-blue-100 rounded-full text-sm">
                                 Agendada
                               </span>
                             )}
@@ -282,22 +301,22 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
 
             {/* AI Analysis Summary */}
             {analytics.evaluations.some((e: any) => e.aiAnalysis) && (
-              <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
-                <h3 className="text-gray-900 mb-4">Insights por IA</h3>
+              <div className="bg-card text-card-foreground rounded-lg border border-border shadow-sm p-4 sm:p-6">
+                <h3 className="text-foreground mb-4">Insights por IA</h3>
                 <div className="space-y-4">
                   {analytics.evaluations
                     .filter((e: any) => e.aiAnalysis)
                     .slice(0, 3)
                     .map((evaluation: any) => (
-                      <div key={evaluation.id} className="bg-blue-50 rounded-lg p-4">
-                        <p className="text-sm text-gray-600 mb-2">
+                      <div key={evaluation.id} className="bg-muted rounded-lg border border-border p-4">
+                        <p className="text-sm text-muted-foreground mb-2">
                           {new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR')}
                         </p>
-                        <p className="text-gray-700">
+                        <p className="text-foreground">
                           {evaluation.aiAnalysis.summary}
                         </p>
                         {evaluation.aiAnalysis.overallScore && (
-                          <p className="text-sm text-gray-600 mt-2">
+                          <p className="text-sm text-muted-foreground mt-2">
                             Pontuação: {evaluation.aiAnalysis.overallScore.toFixed(1)}/10
                           </p>
                         )}
@@ -308,10 +327,10 @@ export function AnalyticsPage({ user, accessToken, onNavigate, onLogout }: Analy
             )}
           </div>
         ) : (
-          <div className="text-center py-10 sm:py-12 bg-white rounded-lg shadow-md">
-            <TrendingUp className="w-12 h-12 sm:w-16 sm:h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-gray-900 mb-2">Sem dados disponíveis</h3>
-            <p className="text-gray-600 mb-6">
+          <div className="text-center py-10 sm:py-12 bg-card text-card-foreground rounded-lg border border-border shadow-sm">
+            <TrendingUp className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Sem dados disponíveis</h3>
+            <p className="text-muted-foreground mb-6">
               Esta empresa ainda não possui avaliações realizadas
             </p>
             <button

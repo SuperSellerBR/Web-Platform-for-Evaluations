@@ -5,6 +5,7 @@ import { projectId } from '../utils/supabase/info';
 import { LoadingDots } from './LoadingDots';
 import { useTheme } from '../utils/theme';
 import { normalizeHexColor } from '../utils/cardBaseColor';
+import { fetchCnpjaOffice, isValidCnpj, officeToCompanyFields, onlyDigits, formatCnpj } from '../utils/cnpj';
 
 interface Company {
   id: string;
@@ -30,6 +31,16 @@ interface Company {
   defaultSurveyId?: string;
 }
 
+type SocioeconomicProfile = {
+  ageRange?: string;
+  gender?: string;
+  maritalStatus?: string;
+  children?: string;
+  incomeClass?: string;
+  education?: string;
+  interests?: string[];
+};
+
 interface CompaniesPageProps {
   user: any;
   accessToken: string;
@@ -38,6 +49,74 @@ interface CompaniesPageProps {
 }
 
 const getDefaultViewMode = () => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'list' : 'card');
+
+const SOCIO_AGE_RANGES = [
+  'Até 17',
+  '18–24',
+  '25–34',
+  '35–44',
+  '45–54',
+  '55–64',
+  '65+',
+];
+
+const SOCIO_GENDERS = [
+  'Feminino',
+  'Masculino',
+  'Não-binário',
+  'Outro',
+  'Prefere não dizer',
+];
+
+const SOCIO_MARITAL_STATUS = [
+  'Solteiro(a)',
+  'Casado(a)',
+  'União estável',
+  'Divorciado(a)',
+  'Viúvo(a)',
+  'Prefere não dizer',
+];
+
+const SOCIO_CHILDREN = [
+  'Não',
+  'Sim (1)',
+  'Sim (2)',
+  'Sim (3+)',
+  'Prefere não dizer',
+];
+
+const SOCIO_INCOME_CLASS = [
+  'Classe A',
+  'Classe B',
+  'Classe C',
+  'Classe D/E',
+  'Prefere não dizer',
+];
+
+const SOCIO_EDUCATION = [
+  'Fundamental',
+  'Médio',
+  'Superior',
+  'Pós-graduação',
+  'Mestrado/Doutorado',
+  'Prefere não dizer',
+];
+
+const SOCIO_INTERESTS = [
+  'Gastronomia',
+  'Música',
+  'Esportes',
+  'Tecnologia',
+  'Saúde',
+  'Moda',
+  'Viagens',
+  'Beleza',
+  'Filmes e séries',
+  'Games',
+  'Sustentabilidade',
+  'Família',
+  'Educação',
+];
 
 export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: CompaniesPageProps) {
   const { resolvedTheme } = useTheme();
@@ -48,10 +127,17 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [companyWizardMode, setCompanyWizardMode] = useState<'create' | 'edit'>('create');
+  const [companyWizardStep, setCompanyWizardStep] = useState<1 | 2 | 3>(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [uploading, setUploading] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cnpjaLoading, setCnpjaLoading] = useState(false);
+  const [cnpjaError, setCnpjaError] = useState<string>('');
+  const [socioError, setSocioError] = useState<string>('');
+  const [partnerWizardError, setPartnerWizardError] = useState<string>('');
+  const [partnerSaving, setPartnerSaving] = useState(false);
   const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
   const [cardPage, setCardPage] = useState(1);
   const [logoErrorMap, setLogoErrorMap] = useState<Record<string, boolean>>({});
@@ -73,6 +159,31 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     voucherValue: 0,
     cardBaseColor: '',
     defaultSurveyId: '',
+    socioeconomicProfile: {
+      ageRange: '',
+      gender: '',
+      maritalStatus: '',
+      children: '',
+      incomeClass: '',
+      education: '',
+      interests: [],
+    },
+  });
+
+  const [partnerFormData, setPartnerFormData] = useState<{
+    name: string;
+    lastName: string;
+    whatsapp: string;
+    email: string;
+    cpf: string;
+    role: string;
+  }>({
+    name: '',
+    lastName: '',
+    whatsapp: '',
+    email: '',
+    cpf: '',
+    role: 'vendedor',
   });
 
   useEffect(() => {
@@ -151,44 +262,98 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const normalizeCardBaseColor = (input: any) => {
+    if (typeof input !== 'string') return undefined;
+    const trimmed = input.trim();
+    const isHex = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed);
+    if (!trimmed || !isHex) return undefined;
+    return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+  };
+
+  const getCompanyIdForWizard = () => editingCompany?.id || '';
+
+  const getSocioProfile = (): SocioeconomicProfile => {
+    const profile = (formData.socioeconomicProfile || {}) as SocioeconomicProfile;
+    return {
+      ageRange: profile.ageRange || '',
+      gender: profile.gender || '',
+      maritalStatus: profile.maritalStatus || '',
+      children: profile.children || '',
+      incomeClass: profile.incomeClass || '',
+      education: profile.education || '',
+      interests: Array.isArray(profile.interests) ? profile.interests : [],
+    };
+  };
+
+  const updateSocioProfile = (patch: Partial<SocioeconomicProfile>) => {
+    setFormData((prev) => ({
+      ...prev,
+      socioeconomicProfile: {
+        ...(prev.socioeconomicProfile || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const saveCompany = async (payload: any, companyId?: string) => {
+    const url = companyId
+      ? `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies/${companyId}`
+      : `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`;
+
+    const response = await fetch(url, {
+      method: companyId ? 'PUT' : 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || 'Erro ao salvar empresa');
+    }
+    return data?.company as Company;
+  };
+
+  const handleWizardSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (companyWizardStep === 3) return;
     setSaving(true);
+    setSocioError('');
     try {
-      const payload: any = { ...formData };
-      if (typeof payload.cardBaseColor === 'string') {
-        const trimmed = payload.cardBaseColor.trim();
-        const isHex = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed);
-        if (!trimmed || !isHex) {
-          delete payload.cardBaseColor;
-        } else {
-          payload.cardBaseColor = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
-        }
-      }
+      const companyId = getCompanyIdForWizard();
 
-      const url = editingCompany
-        ? `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies/${editingCompany.id}`
-        : `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`;
+      if (companyWizardStep === 1) {
+        const payload: any = { ...formData };
+        delete payload.socioeconomicProfile;
+        const normalizedCard = normalizeCardBaseColor(payload.cardBaseColor);
+        if (normalizedCard) payload.cardBaseColor = normalizedCard;
+        else delete payload.cardBaseColor;
 
-      const response = await fetch(url, {
-        method: editingCompany ? 'PUT' : 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) {
+        const saved = await saveCompany(payload, companyId || undefined);
+        setEditingCompany(saved);
+        setFormData((prev) => ({ ...prev, ...saved }));
         await loadCompanies();
-        closeModal();
-      } else {
-        const error = await response.json();
-        alert(`Erro: ${error.error}`);
+        setCompanyWizardStep(2);
+        return;
       }
-    } catch (error) {
-      console.error('Error saving company:', error);
-      alert('Erro ao salvar empresa');
+
+      if (companyWizardStep === 2) {
+        if (!companyId) {
+          setSocioError('Salve os dados cadastrais antes de preencher o perfil socioeconômico.');
+          return;
+        }
+        const payload = { socioeconomicProfile: getSocioProfile() };
+        const saved = await saveCompany(payload, companyId);
+        setEditingCompany(saved);
+        setFormData((prev) => ({ ...prev, ...saved }));
+        await loadCompanies();
+        setCompanyWizardStep(3);
+      }
+    } catch (error: any) {
+      console.error('Error saving company wizard:', error);
+      alert(error?.message || 'Erro ao salvar empresa');
     } finally {
       setSaving(false);
     }
@@ -353,10 +518,30 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
   };
 
 	  const openModal = (company?: Company) => {
+      setCnpjaLoading(false);
+      setCnpjaError('');
+      setSocioError('');
+      setPartnerWizardError('');
+      setPartnerSaving(false);
+      setCompanyWizardStep(1);
 	    if (company) {
+        setCompanyWizardMode('edit');
 	      setEditingCompany(company);
-	      setFormData(company);
+	      setFormData({
+          ...company,
+          socioeconomicProfile: {
+            ageRange: '',
+            gender: '',
+            maritalStatus: '',
+            children: '',
+            incomeClass: '',
+            education: '',
+            interests: [],
+            ...(company.socioeconomicProfile || {}),
+          },
+        });
 	    } else {
+        setCompanyWizardMode('create');
 	      setEditingCompany(null);
 	      setFormData({
 	        name: '',
@@ -375,17 +560,66 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
 	        voucherValue: 0,
 	        cardBaseColor: '',
 	        defaultSurveyId: '',
+          socioeconomicProfile: {
+            ageRange: '',
+            gender: '',
+            maritalStatus: '',
+            children: '',
+            incomeClass: '',
+            education: '',
+            interests: [],
+          },
 	      });
 	    }
+      setPartnerFormData({
+        name: '',
+        lastName: '',
+        whatsapp: '',
+        email: '',
+        cpf: '',
+        role: 'vendedor',
+      });
 	    setShowModal(true);
 	  };
 
-  const closeModal = () => {
-    setShowModal(false);
-    setEditingCompany(null);
-    setFormData({});
-    setSaving(false);
-  };
+	  const closeModal = () => {
+	    setShowModal(false);
+	    setEditingCompany(null);
+	    setFormData({
+        name: '',
+        legalName: '',
+        cnpj: '',
+        phone: '',
+        email: '',
+        address: '',
+        instagram: '',
+        website: '',
+        logoPath: '',
+        logoUrl: '',
+        surveyMonkeyLink: '',
+        managers: [],
+        sellers: [],
+        voucherValue: 0,
+        cardBaseColor: '',
+        defaultSurveyId: '',
+        socioeconomicProfile: {
+          ageRange: '',
+          gender: '',
+          maritalStatus: '',
+          children: '',
+          incomeClass: '',
+          education: '',
+          interests: [],
+        },
+      });
+	    setSaving(false);
+      setCnpjaLoading(false);
+      setCnpjaError('');
+      setSocioError('');
+      setPartnerWizardError('');
+      setPartnerSaving(false);
+      setCompanyWizardStep(1);
+	  };
 
   const getInstagramAvatar = (instagram?: string) => {
     if (!instagram) return '';
@@ -398,8 +632,10 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     return `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/instagram-avatar?handle=${encodeURIComponent(handle)}`;
   };
 
+  const searchDigits = onlyDigits(searchTerm);
   const filteredCompanies = companies.filter(company =>
     company.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (searchDigits.length > 0 && onlyDigits(company.cnpj).includes(searchDigits)) ||
     company.cnpj.includes(searchTerm)
   );
 
@@ -415,6 +651,130 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
   const managers = partners.filter(p => p.role === 'gerente' || p.role === 'manager');
   const sellers = partners.filter(p => p.role === 'vendedor' || p.role === 'seller');
   const cardBaseColorPreview = normalizeHexColor(formData.cardBaseColor) || '#cfd1d4';
+  const companyIdForWizard = getCompanyIdForWizard();
+  const socioProfile = getSocioProfile();
+  const companyPartners = companyIdForWizard
+    ? partners.filter((p) => String(p?.companyId || '') === companyIdForWizard)
+    : [];
+  const canGoToSocio = !!companyIdForWizard;
+  const canGoToPartners = !!companyIdForWizard;
+
+  const currentRole = (user?.role || '').toString().trim().toLowerCase();
+  const isSellerRole = currentRole === 'vendedor' || currentRole === 'seller';
+  const isManagerRole = currentRole === 'gerente' || currentRole === 'manager';
+  const isCompanyRole = currentRole === 'empresa' || currentRole === 'company';
+
+  const partnerRoleOptions = (() => {
+    if (isManagerRole) return [{ value: 'vendedor', label: 'Vendedor' }];
+    if (isCompanyRole) {
+      return [
+        { value: 'gerente', label: 'Gerente' },
+        { value: 'vendedor', label: 'Vendedor' },
+      ];
+    }
+    return [
+      { value: 'gerente', label: 'Gerente' },
+      { value: 'vendedor', label: 'Vendedor' },
+    ];
+  })();
+
+  const createPartnerFromWizard = async () => {
+    if (isSellerRole) {
+      setPartnerWizardError('Você não tem permissão para cadastrar membros da equipe.');
+      return;
+    }
+    if (!companyIdForWizard) {
+      setPartnerWizardError('Salve a empresa antes de cadastrar parceiros.');
+      return;
+    }
+
+    const payload: any = {
+      ...partnerFormData,
+      companyId: companyIdForWizard,
+    };
+
+    const requiredFields: Array<keyof typeof payload> = ['name', 'email', 'cpf', 'role', 'whatsapp'];
+    for (const field of requiredFields) {
+      if (!String(payload[field] || '').trim()) {
+        setPartnerWizardError('Preencha nome, email, CPF, WhatsApp e perfil.');
+        return;
+      }
+    }
+
+    setPartnerSaving(true);
+    setPartnerWizardError('');
+    try {
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setPartnerWizardError(data?.error || 'Erro ao cadastrar parceiro.');
+        return;
+      }
+
+      await loadPartners();
+      setPartnerFormData({
+        name: '',
+        lastName: '',
+        whatsapp: '',
+        email: '',
+        cpf: '',
+        role: partnerRoleOptions.find((opt) => opt.value === 'vendedor')?.value || 'vendedor',
+      });
+    } catch (err: any) {
+      console.error('Error creating partner (wizard):', err);
+      setPartnerWizardError(err?.message || 'Erro ao cadastrar parceiro.');
+    } finally {
+      setPartnerSaving(false);
+    }
+  };
+
+  const lookupCompanyByCnpj = async () => {
+    const digits = onlyDigits(String(formData.cnpj || ''));
+    if (!isValidCnpj(digits)) {
+      setCnpjaError('CNPJ inválido. Verifique e tente novamente.');
+      return;
+    }
+
+    setCnpjaLoading(true);
+    setCnpjaError('');
+    try {
+      const office = await fetchCnpjaOffice(digits);
+      const fields = officeToCompanyFields(office);
+
+      setFormData((prev) => ({
+        ...prev,
+        cnpj: fields.cnpj || prev.cnpj,
+        name: prev.name ? prev.name : fields.name || prev.name,
+        legalName: prev.legalName ? prev.legalName : fields.legalName || prev.legalName,
+        address: prev.address ? prev.address : fields.address || prev.address,
+        phone: prev.phone ? prev.phone : fields.phone || prev.phone,
+        email: prev.email ? prev.email : fields.email || prev.email,
+      }));
+    } catch (error: any) {
+      const msg = String(error?.message || '');
+      if (msg.includes('HTTP 429')) {
+        setCnpjaError('Limite de consultas atingido (CNPJa). Aguarde um minuto e tente novamente.');
+      } else if (msg.includes('HTTP 404')) {
+        setCnpjaError('CNPJ não encontrado no CNPJa.');
+      } else {
+        setCnpjaError('Não foi possível buscar os dados do CNPJ. Tente novamente.');
+      }
+      console.error('CNPJa lookup error:', error);
+    } finally {
+      setCnpjaLoading(false);
+    }
+  };
 
   return (
     <Layout user={user} currentPage="companies" onNavigate={onNavigate} onLogout={onLogout}>
@@ -566,7 +926,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                         </div>
                         <h3 className="text-foreground mb-2">{company.name}</h3>
                         <div className="space-y-1 text-sm text-muted-foreground">
-                          <p>CNPJ: {company.cnpj}</p>
+                          <p>CNPJ: {formatCnpj(company.cnpj)}</p>
                           <p>Email: {company.email}</p>
                           <p>Telefone: {company.phone}</p>
                           {company.voucherValue && (
@@ -664,10 +1024,10 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
 	              <div className="flex items-start justify-between gap-3">
 	                <div>
 	                  <h3 className="text-foreground text-lg font-semibold leading-tight">
-	                    {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
+	                    {companyWizardMode === 'create' ? 'Nova Empresa' : 'Editar Empresa'}
 	                  </h3>
 	                  <p className="text-sm text-muted-foreground mt-1">
-	                    {editingCompany
+	                    {companyWizardMode === 'edit'
 	                      ? 'Atualize as informações da empresa.'
 	                      : 'Cadastre uma nova empresa e configure os dados principais.'}
 	                  </p>
@@ -681,9 +1041,51 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
 	                  <X className="w-5 h-5" />
 	                </button>
 	              </div>
+
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCompanyWizardStep(1)}
+                    className={`px-3 py-2 rounded-lg border text-sm transition-colors text-left ${
+                      companyWizardStep === 1
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-card text-foreground border-border hover:bg-muted'
+                    }`}
+                  >
+                    <span className="font-medium">1.</span> Dados cadastrais
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCompanyWizardStep(2)}
+                    disabled={!canGoToSocio}
+                    className={`px-3 py-2 rounded-lg border text-sm transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed ${
+                      companyWizardStep === 2
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-card text-foreground border-border hover:bg-muted'
+                    }`}
+                    title={!canGoToSocio ? 'Salve a empresa primeiro' : 'Perfil socioeconômico'}
+                  >
+                    <span className="font-medium">2.</span> Perfil socioeconômico
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCompanyWizardStep(3)}
+                    disabled={!canGoToPartners}
+                    className={`px-3 py-2 rounded-lg border text-sm transition-colors text-left disabled:opacity-50 disabled:cursor-not-allowed ${
+                      companyWizardStep === 3
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-card text-foreground border-border hover:bg-muted'
+                    }`}
+                    title={!canGoToPartners ? 'Salve a empresa primeiro' : 'Cadastro de parceiros'}
+                  >
+                    <span className="font-medium">3.</span> Parceiros (equipe)
+                  </button>
+                </div>
 	            </div>
 
-	            <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
+	            <form onSubmit={handleWizardSubmit} className="p-4 sm:p-6 space-y-4">
+                {companyWizardStep === 1 && (
+                  <div className="space-y-4">
 	              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 	                <div>
 	                  <label className="block text-foreground mb-2">Nome</label>
@@ -709,13 +1111,37 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
 
                 <div>
                   <label className="block text-foreground mb-2">CNPJ</label>
-                  <input
-                    type="text"
-                    value={formData.cnpj || ''}
-                    onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
-                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
-                    required
-                  />
+                  <div className="flex items-stretch gap-2">
+                    <input
+                      type="text"
+                      value={formData.cnpj || ''}
+                      onChange={(e) => {
+                        setCnpjaError('');
+                        setFormData({ ...formData, cnpj: e.target.value });
+                      }}
+                      className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
+                      required
+                      placeholder="00.000.000/0000-00"
+                      inputMode="numeric"
+                      autoComplete="off"
+                    />
+                    <button
+                      type="button"
+                      onClick={lookupCompanyByCnpj}
+                      disabled={cnpjaLoading}
+                      className="px-3 py-2 border border-border rounded-lg hover:bg-muted transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                      title="Buscar dados da empresa pelo CNPJ (CNPJa)"
+                    >
+                      {cnpjaLoading ? <LoadingDots label="Buscando" /> : 'Buscar'}
+                    </button>
+                  </div>
+                  {cnpjaError ? (
+                    <p className="text-sm text-destructive mt-2">{cnpjaError}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Busca dados no CNPJa (limite ~5 consultas/min por IP). Não sobrescreve campos já preenchidos.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -931,25 +1357,373 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4 border-t border-border">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="w-full sm:flex-1 px-6 py-3 border border-border rounded-lg hover:bg-muted transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={uploading || logoUploading || saving}
-                  className="w-full sm:flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
-                >
-                  {saving ? (
-                    <LoadingDots label={editingCompany ? 'Salvando' : 'Cadastrando'} />
-                  ) : editingCompany ? 'Salvar' : 'Cadastrar'}
-                </button>
-              </div>
-            </form>
+                  </div>
+                )}
+
+                {companyWizardStep === 2 && (
+                  <div className="space-y-4">
+                    <div className="rounded-lg border border-border bg-muted/40 p-4">
+                      <p className="text-sm text-muted-foreground">Etapa opcional</p>
+                      <p className="text-foreground font-medium mt-1">
+                        Perfil socioeconômico do cliente
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Descreve o perfil esperado do cliente (persona). Preencha apenas o que fizer sentido.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-foreground mb-2">Idade (faixa)</label>
+                        <select
+                          value={socioProfile.ageRange || ''}
+                          onChange={(e) => updateSocioProfile({ ageRange: e.target.value })}
+                          className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Não informado</option>
+                          {SOCIO_AGE_RANGES.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-foreground mb-2">Gênero (quando relevante)</label>
+                        <select
+                          value={socioProfile.gender || ''}
+                          onChange={(e) => updateSocioProfile({ gender: e.target.value })}
+                          className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Não informado</option>
+                          {SOCIO_GENDERS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-foreground mb-2">Estado civil</label>
+                        <select
+                          value={socioProfile.maritalStatus || ''}
+                          onChange={(e) => updateSocioProfile({ maritalStatus: e.target.value })}
+                          className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Não informado</option>
+                          {SOCIO_MARITAL_STATUS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-foreground mb-2">Filhos</label>
+                        <select
+                          value={socioProfile.children || ''}
+                          onChange={(e) => updateSocioProfile({ children: e.target.value })}
+                          className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Não informado</option>
+                          {SOCIO_CHILDREN.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-foreground mb-2">Renda média / classe econômica</label>
+                        <select
+                          value={socioProfile.incomeClass || ''}
+                          onChange={(e) => updateSocioProfile({ incomeClass: e.target.value })}
+                          className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Não informado</option>
+                          {SOCIO_INCOME_CLASS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-foreground mb-2">Escolaridade</label>
+                        <select
+                          value={socioProfile.education || ''}
+                          onChange={(e) => updateSocioProfile({ education: e.target.value })}
+                          className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Não informado</option>
+                          {SOCIO_EDUCATION.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-foreground mb-2">Interesses</label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {SOCIO_INTERESTS.map((interest) => {
+                          const selected = (socioProfile.interests || []).includes(interest);
+                          return (
+                            <label
+                              key={interest}
+                              className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                                selected
+                                  ? 'bg-primary text-primary-foreground border-primary'
+                                  : 'bg-card text-foreground border-border hover:bg-muted'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="accent-current"
+                                checked={selected}
+                                onChange={() => {
+                                  const current = socioProfile.interests || [];
+                                  const next = selected
+                                    ? current.filter((i) => i !== interest)
+                                    : [...current, interest];
+                                  updateSocioProfile({ interests: next });
+                                }}
+                              />
+                              <span className="text-sm">{interest}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">Você pode selecionar nenhum, um ou vários.</p>
+                    </div>
+
+                    {socioError && <p className="text-sm text-destructive">{socioError}</p>}
+                  </div>
+                )}
+
+                {companyWizardStep === 3 && (
+                  <div className="space-y-4">
+                    <div className="rounded-lg border border-border bg-muted/40 p-4">
+                      <p className="text-sm text-muted-foreground">Etapa opcional</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Você pode cadastrar a equipe agora ou depois na tela <span className="text-foreground font-medium">Equipe</span>.
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-card p-4">
+                      <h4 className="text-foreground font-semibold mb-3">Cadastrar parceiro</h4>
+
+                      {isSellerRole ? (
+                        <p className="text-sm text-muted-foreground">
+                          Você não tem permissão para cadastrar membros da equipe.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-foreground mb-2">Nome</label>
+                              <input
+                                type="text"
+                                value={partnerFormData.name}
+                                onChange={(e) => setPartnerFormData((prev) => ({ ...prev, name: e.target.value }))}
+                                className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
+                                placeholder="Ex: Maria"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-foreground mb-2">Sobrenome</label>
+                              <input
+                                type="text"
+                                value={partnerFormData.lastName}
+                                onChange={(e) => setPartnerFormData((prev) => ({ ...prev, lastName: e.target.value }))}
+                                className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
+                                placeholder="Ex: Silva"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-foreground mb-2">WhatsApp</label>
+                              <input
+                                type="text"
+                                value={partnerFormData.whatsapp}
+                                onChange={(e) => setPartnerFormData((prev) => ({ ...prev, whatsapp: e.target.value }))}
+                                className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
+                                placeholder="(11) 99999-9999"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-foreground mb-2">Email</label>
+                              <input
+                                type="email"
+                                value={partnerFormData.email}
+                                onChange={(e) => setPartnerFormData((prev) => ({ ...prev, email: e.target.value }))}
+                                className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
+                                placeholder="email@empresa.com"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-foreground mb-2">CPF</label>
+                              <input
+                                type="text"
+                                value={partnerFormData.cpf}
+                                onChange={(e) => setPartnerFormData((prev) => ({ ...prev, cpf: e.target.value }))}
+                                className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
+                                placeholder="000.000.000-00"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-foreground mb-2">Perfil</label>
+                              <select
+                                value={partnerFormData.role}
+                                onChange={(e) => setPartnerFormData((prev) => ({ ...prev, role: e.target.value }))}
+                                className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
+                              >
+                                {partnerRoleOptions.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {partnerWizardError && (
+                            <p className="text-sm text-destructive mt-3">{partnerWizardError}</p>
+                          )}
+
+                          <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                            <button
+                              type="button"
+                              onClick={createPartnerFromWizard}
+                              disabled={partnerSaving}
+                              className="w-full sm:w-auto bg-blue-600 text-white px-5 py-2.5 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+                            >
+                              {partnerSaving ? <LoadingDots label="Cadastrando" /> : 'Cadastrar parceiro'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                closeModal();
+                                onNavigate('partners');
+                              }}
+                              className="w-full sm:w-auto px-5 py-2.5 border border-border rounded-lg hover:bg-muted transition-colors"
+                            >
+                              Abrir Equipe
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-card p-4">
+                      <h4 className="text-foreground font-semibold mb-3">Equipe desta empresa</h4>
+                      {companyPartners.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Nenhum parceiro cadastrado para esta empresa ainda.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {companyPartners.map((p: any) => (
+                            <div
+                              key={p.id}
+                              className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-sm text-foreground font-medium truncate">
+                                  {String(p?.name || '')} {String(p?.lastName || '')}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {String(p?.email || '')}
+                                </p>
+                              </div>
+                              <span className="text-xs px-2 py-1 rounded-full border border-border bg-muted text-foreground capitalize">
+                                {String(p?.role || '')}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4 border-t border-border">
+                  {companyWizardStep === 1 ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={closeModal}
+                        className="w-full sm:flex-1 px-6 py-3 border border-border rounded-lg hover:bg-muted transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={uploading || logoUploading || saving}
+                        className="w-full sm:flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+                      >
+                        {saving ? <LoadingDots label={companyIdForWizard ? 'Salvando' : 'Cadastrando'} /> : 'Próximo'}
+                      </button>
+                    </>
+                  ) : companyWizardStep === 2 ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setCompanyWizardStep(1)}
+                        className="w-full sm:flex-1 px-6 py-3 border border-border rounded-lg hover:bg-muted transition-colors"
+                      >
+                        Voltar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCompanyWizardStep(3)}
+                        className="w-full sm:flex-1 px-6 py-3 border border-border rounded-lg hover:bg-muted transition-colors"
+                      >
+                        Pular
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={saving}
+                        className="w-full sm:flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+                      >
+                        {saving ? <LoadingDots label="Salvando" /> : 'Salvar e avançar'}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setCompanyWizardStep(2)}
+                        className="w-full sm:flex-1 px-6 py-3 border border-border rounded-lg hover:bg-muted transition-colors"
+                      >
+                        Voltar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await loadCompanies();
+                          await loadPartners();
+                          closeModal();
+                        }}
+                        className="w-full sm:flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Concluir
+                      </button>
+                    </>
+                  )}
+                </div>
+	            </form>
           </div>
         </div>
       )}
