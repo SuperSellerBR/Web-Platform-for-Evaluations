@@ -27,54 +27,6 @@ if (!bucketExists) {
   await supabase.storage.createBucket(BUCKET_NAME, { public: false });
 }
 
-// ===== KV helpers (performance) =====
-const KV_TABLE = "kv_store_7946999d";
-const KV_PREFIX_PAGE_SIZE = 1000;
-const KV_PREFIX_END_CHAR = "\uffff";
-
-function kvPrefixEnd(prefix: string) {
-  return `${prefix}${KV_PREFIX_END_CHAR}`;
-}
-
-async function kvListKeysByPrefix(prefix: string): Promise<string[]> {
-  const out: string[] = [];
-  const end = kvPrefixEnd(prefix);
-  for (let offset = 0; ; offset += KV_PREFIX_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from(KV_TABLE)
-      .select("key")
-      .gte("key", prefix)
-      .lt("key", end)
-      .range(offset, offset + KV_PREFIX_PAGE_SIZE - 1);
-    if (error) throw new Error(error.message);
-    const keys = (data ?? []).map((row: any) => String(row.key));
-    out.push(...keys);
-    if (keys.length < KV_PREFIX_PAGE_SIZE) break;
-  }
-  return out;
-}
-
-async function kvGetManyOrdered(keys: string[], chunkSize = 200): Promise<any[]> {
-  const byKey = new Map<string, any>();
-  for (let i = 0; i < keys.length; i += chunkSize) {
-    const chunk = keys.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from(KV_TABLE)
-      .select("key, value")
-      .in("key", chunk);
-    if (error) throw new Error(error.message);
-    for (const row of data ?? []) {
-      byKey.set(String((row as any).key), (row as any).value);
-    }
-  }
-  return keys.map((k) => (byKey.has(k) ? byKey.get(k) : null));
-}
-
-function extractIdFromIndexKey(indexKey: string) {
-  const parts = indexKey.split(":");
-  return parts.length ? parts[parts.length - 1] : "";
-}
-
 
 // Logo remoto (superseller) usado no PDF
 const LOGO_URL =
@@ -2232,32 +2184,41 @@ app.get("/make-server-7946999d/evaluations", async (c) => {
       if (companyId && companyId !== scopedCompanyId) {
         return c.json({ error: "Forbidden" }, 403);
       }
-      const indexPrefix = `evaluations:by_company:${scopedCompanyId}:`;
-      const indexKeys = await kvListKeysByPrefix(indexPrefix);
-      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
-      const evaluationKeys = ids.map((id) => `evaluations:${id}`);
-      evaluations = await kvGetManyOrdered(evaluationKeys);
+      const keys = await kv.getByPrefix(
+        `evaluations:by_company:${scopedCompanyId}:`,
+      );
+      const ids = keys.map((k) => k.value.id);
+      evaluations = await Promise.all(
+        ids.map((id) => kv.get(`evaluations:${id}`)),
+      );
       if (evaluatorId) {
         evaluations = evaluations.filter((e) => e?.evaluatorId === evaluatorId);
       }
     } else if (evaluatorId) {
-      const indexPrefix = `evaluations:by_evaluator:${evaluatorId}:`;
-      const indexKeys = await kvListKeysByPrefix(indexPrefix);
-      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
-      const evaluationKeys = ids.map((id) => `evaluations:${id}`);
-      evaluations = await kvGetManyOrdered(evaluationKeys);
-    } else if (companyId) {
-      const indexPrefix = `evaluations:by_company:${companyId}:`;
-      const indexKeys = await kvListKeysByPrefix(indexPrefix);
-      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
-      const evaluationKeys = ids.map((id) => `evaluations:${id}`);
-      evaluations = await kvGetManyOrdered(evaluationKeys);
-    } else {
-      const allKeys = await kvListKeysByPrefix("evaluations:");
-      const evaluationKeys = allKeys.filter((k) =>
-        k.startsWith("evaluations:") && !k.startsWith("evaluations:by_")
+      const keys = await kv.getByPrefix(
+        `evaluations:by_evaluator:${evaluatorId}:`,
       );
-      evaluations = await kvGetManyOrdered(evaluationKeys);
+      const ids = keys.map((k) => k.value.id);
+      evaluations = await Promise.all(
+        ids.map((id) => kv.get(`evaluations:${id}`)),
+      );
+    } else if (companyId) {
+      const keys = await kv.getByPrefix(
+        `evaluations:by_company:${companyId}:`,
+      );
+      const ids = keys.map((k) => k.value.id);
+      evaluations = await Promise.all(
+        ids.map((id) => kv.get(`evaluations:${id}`)),
+      );
+    } else {
+      const allEvals = await kv.getByPrefix("evaluations:");
+      evaluations = allEvals
+        .filter(
+          (item) =>
+            item.key.startsWith("evaluations:") &&
+            !item.key.includes(":by_"),
+        )
+        .map((item) => item.value);
     }
 
     let filtered = evaluations.filter((e) => e !== null);
@@ -2411,21 +2372,12 @@ app.get("/make-server-7946999d/dashboard/summary", async (c) => {
   };
 
   try {
-    // Carrega avaliações (evita varredura + N+1 quando há filtro por empresa)
-    let evaluations: any[] = [];
-    if (companyId) {
-      const indexPrefix = `evaluations:by_company:${companyId}:`;
-      const indexKeys = await kvListKeysByPrefix(indexPrefix);
-      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
-      const evalKeys = ids.map((id) => `evaluations:${id}`);
-      evaluations = (await kvGetManyOrdered(evalKeys)).filter(Boolean);
-    } else {
-      const allKeys = await kvListKeysByPrefix("evaluations:");
-      const evalKeys = allKeys.filter((k) =>
-        k.startsWith("evaluations:") && !k.startsWith("evaluations:by_")
-      );
-      evaluations = (await kvGetManyOrdered(evalKeys)).filter(Boolean);
-    }
+    // Carrega avaliações do KV (apenas as principais)
+    const all = await kv.getByPrefix("evaluations:");
+    let evaluations = all
+      .filter((item) => item.key.startsWith("evaluations:") && !item.key.includes(":by_"))
+      .map((item) => item.value)
+      .filter(Boolean);
 
     // Filtro por empresa
     if (companyId) {
@@ -3401,10 +3353,12 @@ app.get(
       }
 
       // Get all evaluations for this company
-      const indexPrefix = `evaluations:by_company:${companyId}:`;
-      const indexKeys = await kvListKeysByPrefix(indexPrefix);
-      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
-      const evaluations = await kvGetManyOrdered(ids.map((id) => `evaluations:${id}`));
+      const evaluationRefs = await kv.getByPrefix(
+        `evaluations:by_company:${companyId}:`,
+      );
+      const evaluations = await Promise.all(
+        evaluationRefs.map((ref) => kv.get(`evaluations:${ref.value.id}`)),
+      );
 
       const completedEvaluations = evaluations.filter(
         (e) => e && e.status === "completed",

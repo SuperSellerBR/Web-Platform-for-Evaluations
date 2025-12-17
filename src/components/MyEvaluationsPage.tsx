@@ -181,15 +181,16 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
     const audioDone = !!(evaluation.audioPath || evaluation.audioUrl);
     const aiDone = !!evaluation.aiAnalysis;
 
-    return {
-      id: String(evaluation.id),
-      companyName: company?.name || 'N/A',
-      logoUrl: company?.logoUrl,
-      dateLabel: new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR'),
-      voucherCode: evaluation.voucherCode,
-      voucherValue: parseNumber(
-        evaluation.voucherValue ?? evaluation.visitData?.voucherValue ?? company?.voucherValue
-      ),
+	    return {
+	      id: String(evaluation.id),
+	      companyName: company?.name || 'N/A',
+	      logoUrl: company?.logoUrl,
+	      baseColor: company?.cardBaseColor || company?.card_base_color,
+	      dateLabel: new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR'),
+	      voucherCode: evaluation.voucherCode,
+	      voucherValue: parseNumber(
+	        evaluation.voucherValue ?? evaluation.visitData?.voucherValue ?? company?.voucherValue
+	      ),
       evaluatorName: resolveEvaluatorFullName(),
       maskedId,
       accentSeed: company?.name || company?.id || String(evaluation.id),
@@ -270,7 +271,7 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
                             onNavigate('evaluation-detail', evaluation.id);
                           }
                         }}
-                        className="bg-card border border-border rounded-lg shadow-md p-4 sm:p-6 hover:shadow-lg hover:shadow-primary/10 transition-shadow text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        className="bg-card border border-border rounded-lg shadow-md p-4 sm:p-6 hover:shadow-lg hover:shadow-primary/10 transition-shadow text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30 dark:border-white/10 dark:ring-1 dark:ring-white/10 dark:shadow-[0_18px_44px_rgba(0,0,0,0.75),0_0_0_1px_rgba(255,255,255,0.10)] dark:hover:shadow-[0_22px_54px_rgba(0,0,0,0.8),0_0_0_1px_rgba(255,255,255,0.12)]"
                       >
                         <div className="flex flex-wrap items-start justify-between gap-4 mb-3">
                           <div className="flex items-center gap-2 min-w-0">

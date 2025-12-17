@@ -4,6 +4,7 @@ import { Plus, Edit, Trash2, Search, Building2, LayoutGrid, List, X } from 'luci
 import { projectId } from '../utils/supabase/info';
 import { LoadingDots } from './LoadingDots';
 import { useTheme } from '../utils/theme';
+import { normalizeHexColor } from '../utils/cardBaseColor';
 
 interface Company {
   id: string;
@@ -24,6 +25,7 @@ interface Company {
   sellers?: string[];
   socioeconomicProfile?: any;
   voucherValue?: number;
+  cardBaseColor?: string;
   openingHours?: any;
   defaultSurveyId?: string;
 }
@@ -69,6 +71,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     managers: [],
     sellers: [],
     voucherValue: 0,
+    cardBaseColor: '',
     defaultSurveyId: '',
   });
 
@@ -152,6 +155,17 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     e.preventDefault();
     setSaving(true);
     try {
+      const payload: any = { ...formData };
+      if (typeof payload.cardBaseColor === 'string') {
+        const trimmed = payload.cardBaseColor.trim();
+        const isHex = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed);
+        if (!trimmed || !isHex) {
+          delete payload.cardBaseColor;
+        } else {
+          payload.cardBaseColor = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+        }
+      }
+
       const url = editingCompany
         ? `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies/${editingCompany.id}`
         : `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`;
@@ -162,7 +176,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload),
       });
 
       if (response.ok) {
@@ -338,32 +352,33 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     }
   };
 
-  const openModal = (company?: Company) => {
-    if (company) {
-      setEditingCompany(company);
-      setFormData(company);
-    } else {
-      setEditingCompany(null);
-      setFormData({
-        name: '',
-        legalName: '',
-        cnpj: '',
-        phone: '',
-        email: '',
-        address: '',
-        instagram: '',
-        website: '',
-        logoPath: '',
-        logoUrl: '',
-        surveyMonkeyLink: '',
-        managers: [],
-        sellers: [],
-        voucherValue: 0,
-        defaultSurveyId: '',
-      });
-    }
-    setShowModal(true);
-  };
+	  const openModal = (company?: Company) => {
+	    if (company) {
+	      setEditingCompany(company);
+	      setFormData(company);
+	    } else {
+	      setEditingCompany(null);
+	      setFormData({
+	        name: '',
+	        legalName: '',
+	        cnpj: '',
+	        phone: '',
+	        email: '',
+	        address: '',
+	        instagram: '',
+	        website: '',
+	        logoPath: '',
+	        logoUrl: '',
+	        surveyMonkeyLink: '',
+	        managers: [],
+	        sellers: [],
+	        voucherValue: 0,
+	        cardBaseColor: '',
+	        defaultSurveyId: '',
+	      });
+	    }
+	    setShowModal(true);
+	  };
 
   const closeModal = () => {
     setShowModal(false);
@@ -399,6 +414,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
 
   const managers = partners.filter(p => p.role === 'gerente' || p.role === 'manager');
   const sellers = partners.filter(p => p.role === 'vendedor' || p.role === 'seller');
+  const cardBaseColorPreview = normalizeHexColor(formData.cardBaseColor) || '#cfd1d4';
 
   return (
     <Layout user={user} currentPage="companies" onNavigate={onNavigate} onLogout={onLogout}>
@@ -640,39 +656,39 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
         )}
       </div>
 
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-card text-foreground border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-lg">
-            <div className="sticky top-0 bg-card border-b border-border px-4 py-3 sm:px-6 sm:py-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-foreground text-lg font-semibold leading-tight">
-                    {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
-                  </h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {editingCompany
-                      ? 'Atualize as informações da empresa.'
-                      : 'Cadastre uma nova empresa e configure os dados principais.'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="shrink-0 p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                  aria-label="Fechar modal"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
+	      {/* Modal */}
+	      {showModal && (
+	        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+	          <div className="bg-card text-foreground border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-lg">
+	            <div className="sticky top-0 z-20 bg-card border-b border-border px-4 py-3 sm:px-6 sm:py-4">
+	              <div className="flex items-start justify-between gap-3">
+	                <div>
+	                  <h3 className="text-foreground text-lg font-semibold leading-tight">
+	                    {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
+	                  </h3>
+	                  <p className="text-sm text-muted-foreground mt-1">
+	                    {editingCompany
+	                      ? 'Atualize as informações da empresa.'
+	                      : 'Cadastre uma nova empresa e configure os dados principais.'}
+	                  </p>
+	                </div>
+	                <button
+	                  type="button"
+	                  onClick={closeModal}
+	                  className="shrink-0 p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+	                  aria-label="Fechar modal"
+	                >
+	                  <X className="w-5 h-5" />
+	                </button>
+	              </div>
+	            </div>
 
-            <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-foreground mb-2">Nome</label>
-                  <input
-                    type="text"
+	            <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
+	              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+	                <div>
+	                  <label className="block text-foreground mb-2">Nome</label>
+	                  <input
+	                    type="text"
                     value={formData.name || ''}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
@@ -724,17 +740,64 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                   />
                 </div>
 
-                <div>
-                  <label className="block text-foreground mb-2">Valor do Voucher (R$)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.voucherValue || ''}
-                    onChange={(e) => setFormData({ ...formData, voucherValue: parseFloat(e.target.value) })}
-                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-              </div>
+	                <div>
+	                  <label className="block text-foreground mb-2">Valor do Voucher (R$)</label>
+	                  <input
+	                    type="number"
+	                    step="0.01"
+	                    value={formData.voucherValue || ''}
+	                    onChange={(e) => setFormData({ ...formData, voucherValue: parseFloat(e.target.value) })}
+	                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
+	                  />
+	                </div>
+
+		                <div>
+			                  <label className="block text-foreground mb-2">Cor do cartão (base)</label>
+			                  <div className="flex items-center gap-3">
+		                    <label
+		                      className="relative h-10 w-12 shrink-0 rounded-lg border border-border bg-input-background overflow-hidden cursor-pointer shadow-sm focus-within:ring-2 focus-within:ring-primary/40"
+		                      title={cardBaseColorPreview}
+		                    >
+		                      <span className="absolute inset-0" style={{ background: cardBaseColorPreview }} />
+			                      <span
+			                        className="absolute inset-0 pointer-events-none opacity-20"
+			                        style={{
+			                          background:
+			                            'radial-gradient(120% 120% at 20% 20%, rgba(255,255,255,0.9), transparent 55%)',
+			                        }}
+			                      />
+			                      <span
+			                        className="absolute inset-0 pointer-events-none opacity-14"
+			                        style={{ background: 'linear-gradient(135deg, transparent 60%, rgba(0,0,0,0.18) 100%)' }}
+			                      />
+		                      <input
+		                        type="color"
+		                        value={cardBaseColorPreview}
+		                        onChange={(e) => setFormData({ ...formData, cardBaseColor: e.target.value })}
+		                        aria-label="Selecionar cor do cartão"
+		                        className="absolute inset-0 opacity-0 cursor-pointer"
+		                      />
+		                    </label>
+		                    <input
+		                      type="text"
+		                      value={formData.cardBaseColor || ''}
+		                      onChange={(e) => setFormData({ ...formData, cardBaseColor: e.target.value })}
+		                      placeholder="#cfd1d4 (padrão)"
+		                      className="flex-1 px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary font-mono uppercase tracking-wide"
+		                    />
+		                    <button
+		                      type="button"
+		                      onClick={() => setFormData({ ...formData, cardBaseColor: '' })}
+	                      className="px-3 py-2 border border-border rounded-lg hover:bg-muted transition-colors text-sm"
+	                    >
+	                      Padrão
+	                    </button>
+	                  </div>
+	                  <p className="text-xs text-muted-foreground mt-2">
+	                    Define a cor principal do cartão exibido ao avaliador (os efeitos de iluminação permanecem).
+	                  </p>
+	                </div>
+	              </div>
 
               <div>
                 <label className="block text-foreground mb-2">Endereço</label>

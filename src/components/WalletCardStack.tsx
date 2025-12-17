@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BrainCog, FilePenLine, Mic, QrCode } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { getCardBaseGradient } from '../utils/cardBaseColor';
+import { useTheme } from '../utils/theme';
 
 export type WalletCardItem = {
   id: string;
@@ -11,6 +13,7 @@ export type WalletCardItem = {
   voucherValue?: number | null;
   evaluatorName?: string;
   accentSeed?: string;
+  baseColor?: string;
   maskedId?: string;
   companyDisplay?: string;
   statuses?: Array<{ key: string; label: string; done: boolean; Icon: any }>;
@@ -53,18 +56,24 @@ const formatCurrency = (value?: number | null) => {
 export function WalletCardStack({ items, onOpen }: WalletCardStackProps) {
   if (!items.length) return null;
 
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
+
   return (
     <div className="space-y-6 w-full">
       {items.map((item) => {
         const accent = BRAND_COLORS[hashToIndex(item.accentSeed || item.companyName || item.id)];
         const accentGradient = `linear-gradient(135deg, ${accent}, ${accent}dd)`;
         const currency = formatCurrency(item.voucherValue);
+        const baseGradient = getCardBaseGradient(item.baseColor);
 
         return (
           <WalletCard
             key={item.id}
             item={item}
             accentGradient={accentGradient}
+            baseGradient={baseGradient}
+            isDark={isDark}
             onOpen={() => onOpen(item.id)}
             currency={currency}
           />
@@ -77,10 +86,12 @@ export function WalletCardStack({ items, onOpen }: WalletCardStackProps) {
 function WalletCard(props: {
   item: WalletCardItem;
   accentGradient: string;
+  baseGradient: string;
+  isDark: boolean;
   onOpen: () => void;
   currency: string | null;
 }) {
-  const { item, accentGradient, onOpen, currency } = props;
+  const { item, accentGradient, baseGradient, isDark, onOpen, currency } = props;
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
 
@@ -121,6 +132,14 @@ function WalletCard(props: {
     };
   }, [width]);
 
+  const cardShadow = isDark
+    ? '0 34px 90px -36px rgba(0,0,0,0.95), 0 18px 34px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.18), 0 0 36px rgba(255,255,255,0.10)'
+    : '0 20px 36px -18px rgba(0,0,0,0.32), 0 10px 24px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.08)';
+
+  const cardFilter = isDark
+    ? 'drop-shadow(0 22px 44px rgba(0,0,0,0.9)) drop-shadow(0 0 34px rgba(255,255,255,0.14))'
+    : 'drop-shadow(0 12px 24px rgba(0,0,0,0.2))';
+
   return (
     <button
       type="button"
@@ -129,35 +148,48 @@ function WalletCard(props: {
     >
       <div ref={cardRef} className="mx-auto" style={{ width: '100%', aspectRatio: '16 / 10', maxWidth: '100%' }}>
         <div className="relative" style={{ height: dims.h, padding: dims.frame }}>
+          {isDark ? (
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                padding: dims.frame,
+                borderRadius: dims.radius,
+                transform: `translateY(${dims.frame * 0.55}px)`,
+                filter: 'blur(18px)',
+                background:
+                  'radial-gradient(80% 110% at 50% 35%, rgba(255,255,255,0.18), rgba(255,255,255,0.06) 55%, transparent 72%)',
+                opacity: 0.95,
+              }}
+            />
+          ) : null}
           <div
-            className="relative overflow-hidden shadow-[0_26px_40px_-18px_rgba(15,23,42,0.65),0_12px_20px_rgba(0,0,0,0.25)]"
-            style={{
-              height: '100%',
-              borderRadius: dims.radius,
-              background: '#2f2f2f',
-              boxShadow:
-                '0 20px 36px -18px rgba(0,0,0,0.32), 0 10px 24px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.08)',
-              filter: 'drop-shadow(0 12px 24px rgba(0,0,0,0.2))',
-            }}
-          >
+            className="relative z-10 overflow-hidden shadow-[0_26px_40px_-18px_rgba(15,23,42,0.65),0_12px_20px_rgba(0,0,0,0.25)]"
+	            style={{
+	              height: '100%',
+	              borderRadius: dims.radius,
+	              background: '#2f2f2f',
+	              boxShadow: cardShadow,
+	              filter: cardFilter,
+	            }}
+	          >
             <div
               className="absolute inset-0"
-              style={{
-                padding: dims.pad,
-                borderRadius: dims.radius - 4,
-                background: 'linear-gradient(145deg, #bfc0c0 0%, #cfd1d4 45%, #f5f6f8 90%)',
-              }}
-            >
-              <div className="absolute inset-0 pointer-events-none">
-                <div
-                  className="w-full h-full opacity-40"
-                  style={{ background: 'radial-gradient(120% 120% at 20% 20%, rgba(255,255,255,0.8), transparent 55%)' }}
-                />
-                <div
-                  className="w-full h-full opacity-25"
-                  style={{ background: 'linear-gradient(135deg, transparent 60%, rgba(0,0,0,0.16) 100%)' }}
-                />
-              </div>
+	              style={{
+	                padding: dims.pad,
+	                borderRadius: dims.radius - 4,
+	                background: baseGradient,
+	              }}
+	            >
+	              <div className="absolute inset-0 pointer-events-none">
+	                <div
+	                  className="w-full h-full opacity-20"
+	                  style={{ background: 'radial-gradient(120% 120% at 20% 20%, rgba(255,255,255,0.8), transparent 55%)' }}
+	                />
+	                <div
+	                  className="w-full h-full opacity-14"
+	                  style={{ background: 'linear-gradient(135deg, transparent 60%, rgba(0,0,0,0.16) 100%)' }}
+	                />
+	              </div>
 
               {/* Logo */}
               <div

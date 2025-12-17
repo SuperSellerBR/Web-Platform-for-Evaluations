@@ -250,15 +250,16 @@ export function VoucherValidationPage({
     const audioDone = !!(evaluation.audioPath || evaluation.audioUrl);
     const aiDone = !!evaluation.aiAnalysis;
 
-    return {
-      id: String(evaluation.id),
-      companyName: company?.name || 'Empresa',
-      logoUrl: company?.logoUrl,
-      dateLabel: new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR'),
-      voucherCode: evaluation.voucherCode,
-      voucherValue: parseNumber(
-        evaluation.voucherValue ?? evaluation.visitData?.voucherValue ?? company?.voucherValue
-      ),
+	    return {
+	      id: String(evaluation.id),
+	      companyName: company?.name || 'Empresa',
+	      logoUrl: company?.logoUrl,
+	      baseColor: company?.cardBaseColor || company?.card_base_color,
+	      dateLabel: new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR'),
+	      voucherCode: evaluation.voucherCode,
+	      voucherValue: parseNumber(
+	        evaluation.voucherValue ?? evaluation.visitData?.voucherValue ?? company?.voucherValue
+	      ),
       evaluatorName: formatFullName(evaluator?.name, evaluator?.lastName) || '',
       accentSeed: company?.name || company?.id || String(evaluation.id),
       companyDisplay: company?.name || 'Empresa',

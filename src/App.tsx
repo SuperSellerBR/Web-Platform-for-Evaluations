@@ -1,25 +1,20 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { projectId, publicAnonKey } from './utils/supabase/info';
-
-const LoginPage = lazy(() => import('./components/LoginPage').then((m) => ({ default: m.LoginPage })));
-const Dashboard = lazy(() => import('./components/Dashboard').then((m) => ({ default: m.Dashboard })));
-const CompaniesPage = lazy(() => import('./components/CompaniesPage').then((m) => ({ default: m.CompaniesPage })));
-const PartnersPage = lazy(() => import('./components/PartnersPage').then((m) => ({ default: m.PartnersPage })));
-const EvaluatorsPage = lazy(() => import('./components/EvaluatorsPage').then((m) => ({ default: m.EvaluatorsPage })));
-const EvaluationsPage = lazy(() => import('./components/EvaluationsPage').then((m) => ({ default: m.EvaluationsPage })));
-const SchedulePage = lazy(() => import('./components/SchedulePage').then((m) => ({ default: m.SchedulePage })));
-const MyEvaluationsPage = lazy(() => import('./components/MyEvaluationsPage').then((m) => ({ default: m.MyEvaluationsPage })));
-const EvaluationDetailPage = lazy(() =>
-  import('./components/EvaluationDetailPage').then((m) => ({ default: m.EvaluationDetailPage }))
-);
-const AnalyticsPage = lazy(() => import('./components/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })));
-const VoucherValidationPage = lazy(() =>
-  import('./components/VoucherValidationPage').then((m) => ({ default: m.VoucherValidationPage }))
-);
-const QuestEditorPage = lazy(() => import('./components/QuestEditorPage').then((m) => ({ default: m.QuestEditorPage })));
-const ProfilePage = lazy(() => import('./components/ProfilePage').then((m) => ({ default: m.ProfilePage })));
-const SettingsPage = lazy(() => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+import { LoginPage } from './components/LoginPage';
+import { Dashboard } from './components/Dashboard';
+import { CompaniesPage } from './components/CompaniesPage';
+import { PartnersPage } from './components/PartnersPage';
+import { EvaluatorsPage } from './components/EvaluatorsPage';
+import { EvaluationsPage } from './components/EvaluationsPage';
+import { SchedulePage } from './components/SchedulePage';
+import { MyEvaluationsPage } from './components/MyEvaluationsPage';
+import { EvaluationDetailPage } from './components/EvaluationDetailPage';
+import { AnalyticsPage } from './components/AnalyticsPage';
+import { VoucherValidationPage } from './components/VoucherValidationPage';
+import { QuestEditorPage } from './components/QuestEditorPage';
+import { ProfilePage } from './components/ProfilePage';
+import { SettingsPage } from './components/SettingsPage';
 
 const supabase = createClient(
   `https://${projectId}.supabase.co`,
@@ -177,85 +172,127 @@ export default function App() {
   }
 
   if (!user || !accessToken) {
-    return (
-      <Suspense
-        fallback={
-          <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-          </div>
-        }
-      >
-        <LoginPage onLogin={handleLogin} />
-      </Suspense>
-    );
+    return <LoginPage onLogin={handleLogin} />;
   }
 
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        </div>
-      }
-    >
-      <div className="min-h-screen bg-background text-foreground">
-        {currentPage === 'profile' && (
-          <ProfilePage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-        {currentPage === 'dashboard' && (
-          <Dashboard user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
+    <div className="min-h-screen bg-background text-foreground">
+      {currentPage === 'profile' && (
+        <ProfilePage
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      {currentPage === 'dashboard' && (
+        <Dashboard 
+          user={user} 
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {currentPage === 'companies' && (
+        <CompaniesPage 
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {currentPage === 'partners' && (
+        <PartnersPage 
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {currentPage === 'evaluators' && (
+        <EvaluatorsPage 
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {currentPage === 'evaluations' && (
+        <EvaluationsPage 
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {currentPage === 'schedule' && (
+        <SchedulePage 
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {currentPage === 'my-evaluations' && (
+        <MyEvaluationsPage 
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {currentPage === 'evaluation-detail' && selectedId && (
+        <EvaluationDetailPage 
+          evaluationId={selectedId}
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+      
+      {currentPage === 'voucher-validation' && (
+        <VoucherValidationPage
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
 
-        {currentPage === 'companies' && (
-          <CompaniesPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
+      {currentPage === 'settings' && (
+        <SettingsPage
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
 
-        {currentPage === 'partners' && (
-          <PartnersPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
+      {currentPage === 'quest-editor' && (
+        <QuestEditorPage
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
 
-        {currentPage === 'evaluators' && (
-          <EvaluatorsPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-
-        {currentPage === 'evaluations' && (
-          <EvaluationsPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-
-        {currentPage === 'schedule' && (
-          <SchedulePage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-
-        {currentPage === 'my-evaluations' && (
-          <MyEvaluationsPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-
-        {currentPage === 'evaluation-detail' && selectedId && (
-          <EvaluationDetailPage
-            evaluationId={selectedId}
-            user={user}
-            accessToken={accessToken}
-            onNavigate={navigateTo}
-            onLogout={handleLogout}
-          />
-        )}
-
-        {currentPage === 'voucher-validation' && (
-          <VoucherValidationPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-
-        {currentPage === 'settings' && (
-          <SettingsPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-
-        {currentPage === 'quest-editor' && (
-          <QuestEditorPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-
-        {currentPage === 'analytics' && (
-          <AnalyticsPage user={user} accessToken={accessToken} onNavigate={navigateTo} onLogout={handleLogout} />
-        )}
-      </div>
-    </Suspense>
+      {currentPage === 'analytics' && (
+        <AnalyticsPage 
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+    </div>
   );
 }
