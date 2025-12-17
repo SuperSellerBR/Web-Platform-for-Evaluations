@@ -12,6 +12,9 @@ export type WalletCardItem = {
   voucherCode?: string;
   voucherValue?: number | null;
   evaluatorName?: string;
+  secondaryLabel?: string;
+  secondaryValue?: string;
+  metrics?: Array<{ key: string; label: string; value: string }>;
   accentSeed?: string;
   baseColor?: string;
   maskedId?: string;
@@ -50,6 +53,16 @@ const formatCurrency = (value?: number | null) => {
     return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   } catch {
     return null;
+  }
+};
+
+const uppercaseName = (value: any) => {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  try {
+    return text.toLocaleUpperCase('pt-BR');
+  } catch {
+    return text.toUpperCase();
   }
 };
 
@@ -140,6 +153,13 @@ function WalletCard(props: {
     ? 'drop-shadow(0 22px 44px rgba(0,0,0,0.9)) drop-shadow(0 0 34px rgba(255,255,255,0.14))'
     : 'drop-shadow(0 12px 24px rgba(0,0,0,0.2))';
 
+  const secondaryLabel = item.secondaryLabel || 'Avaliador';
+  const secondaryValue = item.secondaryValue || item.evaluatorName || '-';
+  const metrics = (item.metrics || []).filter((m) => m?.key && m?.label && m?.value);
+  const companyDisplayText = uppercaseName(item.companyDisplay || item.companyName);
+  const secondaryValueText = uppercaseName(secondaryValue || '-');
+  const companyInitial = uppercaseName(item.companyName || '?').slice(0, 1) || '?';
+
   return (
     <button
       type="button"
@@ -219,7 +239,7 @@ function WalletCard(props: {
                       textTransform: 'uppercase',
                     }}
                   >
-                    {item.companyName?.[0] || '?'}
+                    {companyInitial}
                   </div>
                 )}
               </div>
@@ -251,8 +271,37 @@ function WalletCard(props: {
                 )}
               </div>
 
-              {/* Value (aligned with voucher) */}
-              {currency && (
+              {/* Value / Metrics */}
+              {metrics.length ? (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: dims.h * 0.47,
+                    right: dims.marginTop,
+                    textAlign: 'right',
+                    fontFamily: 'OCRA, monospace',
+                    color: '#2c2c2c',
+                  }}
+                >
+                  {metrics.map((metric, idx) => (
+                    <div key={metric.key} style={{ marginTop: idx ? dims.h * 0.015 : 0 }}>
+                      <div
+                        style={{
+                          fontSize: dims.labelSize,
+                          opacity: 0.75,
+                          letterSpacing: '0.12em',
+                          marginBottom: dims.h * 0.004,
+                        }}
+                      >
+                        {metric.label}
+                      </div>
+                      <div style={{ fontSize: dims.valueSize, letterSpacing: '0.15em', fontWeight: 600 }}>
+                        {metric.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : currency ? (
                 <div
                   style={{
                     position: 'absolute',
@@ -266,7 +315,7 @@ function WalletCard(props: {
                 >
                   {currency}
                 </div>
-              )}
+              ) : null}
 
               {/* Footer - names */}
               <div
@@ -301,7 +350,7 @@ function WalletCard(props: {
                       fontWeight: 600,
                     }}
                   >
-                    {item.companyDisplay || item.companyName}
+                    {companyDisplayText || uppercaseName(item.companyName)}
                   </div>
 
                   <div
@@ -312,7 +361,7 @@ function WalletCard(props: {
                       color: '#2c2c2c',
                     }}
                   >
-                    Avaliador
+                    {secondaryLabel}
                   </div>
                   <div
                     style={{
@@ -324,7 +373,7 @@ function WalletCard(props: {
                       fontWeight: 600,
                     }}
                   >
-                    {item.evaluatorName || '-'}
+                    {secondaryValueText}
                   </div>
                   {item.maskedId && (
                     <div

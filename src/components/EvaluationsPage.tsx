@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layout } from './Layout';
+import { WalletCardItem, WalletCardStack } from './WalletCardStack';
 import {
   BrainCog,
   Calendar,
@@ -8,6 +9,8 @@ import {
   ClipboardList,
   Clock,
   FilePenLine,
+  LayoutGrid,
+  List,
   Mic,
   Pencil,
   QrCode,
@@ -68,6 +71,7 @@ function StatusIconButton(props: { done: boolean; aria: string; tooltip: string;
 const EVALUATIONS_QUERY_KEYS = {
   search: 'evals_q',
   company: 'evals_company',
+  view: 'evals_view',
   from: 'evals_from',
   to: 'evals_to',
   period: 'evals_period',
@@ -75,6 +79,7 @@ const EVALUATIONS_QUERY_KEYS = {
 } as const;
 
 const PERIOD_PRESETS = ['all', 'last1w', 'last4w', 'custom'] as const;
+const VIEW_MODES = ['card', 'list'] as const;
 const ALL_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled'] as const;
 
 export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: EvaluationsPageProps) {
@@ -86,6 +91,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
   const initialUrlState = useMemo(() => {
     const searchTerm = readTrimmedStringParam(EVALUATIONS_QUERY_KEYS.search);
     const companyId = readTrimmedStringParam(EVALUATIONS_QUERY_KEYS.company);
+    const viewMode = readEnumParam(EVALUATIONS_QUERY_KEYS.view, VIEW_MODES, 'list');
     const fromDate = readTrimmedStringParam(EVALUATIONS_QUERY_KEYS.from);
     const toDate = readTrimmedStringParam(EVALUATIONS_QUERY_KEYS.to);
     const presetFromUrl = readEnumParam(EVALUATIONS_QUERY_KEYS.period, PERIOD_PRESETS, 'all');
@@ -96,11 +102,12 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
     const periodPreset: (typeof PERIOD_PRESETS)[number] =
       (fromDate || toDate) && presetFromUrl === 'all' ? 'custom' : presetFromUrl;
 
-    return { searchTerm, companyId, fromDate, toDate, periodPreset, selectedStatuses };
+    return { searchTerm, companyId, viewMode, fromDate, toDate, periodPreset, selectedStatuses };
   }, []);
 
   const [searchTerm, setSearchTerm] = useState(initialUrlState.searchTerm);
   const [companyId, setCompanyId] = useState(initialUrlState.companyId);
+  const [viewMode, setViewMode] = useState<(typeof VIEW_MODES)[number]>(initialUrlState.viewMode);
   const [fromDate, setFromDate] = useState(initialUrlState.fromDate);
   const [toDate, setToDate] = useState(initialUrlState.toDate);
   const [periodPreset, setPeriodPreset] = useState<(typeof PERIOD_PRESETS)[number]>(initialUrlState.periodPreset);
@@ -141,6 +148,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
     writeQueryParamsPatch({
       [EVALUATIONS_QUERY_KEYS.search]: searchTerm || null,
       [EVALUATIONS_QUERY_KEYS.company]: companyId || null,
+      [EVALUATIONS_QUERY_KEYS.view]: viewMode,
       [EVALUATIONS_QUERY_KEYS.from]: fromDate || null,
       [EVALUATIONS_QUERY_KEYS.to]: toDate || null,
       [EVALUATIONS_QUERY_KEYS.period]: periodPreset !== 'all' ? periodPreset : null,
@@ -149,7 +157,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
           ? null
           : encodeStringArrayParam(selectedStatuses),
     });
-  }, [companyId, fromDate, isPartnerPortalRole, periodPreset, prefilterReady, searchTerm, selectedStatuses, toDate]);
+  }, [companyId, fromDate, isPartnerPortalRole, periodPreset, prefilterReady, searchTerm, selectedStatuses, toDate, viewMode]);
 
   const companiesQuery = useQuery<any[]>({
     queryKey: ['companies', accessToken],
@@ -166,6 +174,12 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
   });
   const companies = companiesQuery.data || [];
 
+  const companyById = useMemo(() => {
+    const map = new Map<string, any>();
+    companies.forEach((c: any) => map.set(String(c?.id), c));
+    return map;
+  }, [companies]);
+
   const evaluatorsQuery = useQuery<any[]>({
     queryKey: ['evaluators', accessToken],
     enabled: !!accessToken,
@@ -180,6 +194,12 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
     },
   });
   const evaluators = evaluatorsQuery.data || [];
+
+  const evaluatorById = useMemo(() => {
+    const map = new Map<string, any>();
+    evaluators.forEach((e: any) => map.set(String(e?.id), e));
+    return map;
+  }, [evaluators]);
 
   const evaluationsQuery = useQuery<any[]>({
     queryKey: ['evaluations', accessToken, companyId || 'all'],
@@ -208,14 +228,34 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
     setSelectedIds([]);
   }, [evaluations]);
 
+  useEffect(() => {
+    if (viewMode === 'card') setSelectedIds([]);
+  }, [viewMode]);
+
   const getCompanyName = (companyId: string) => {
-    const company = companies.find(c => c.id === companyId);
+    const company = companyById.get(String(companyId));
     return company?.name || companyId || 'N/A';
   };
 
   const getEvaluatorName = (evaluatorId: string) => {
-    const evaluator = evaluators.find(e => e.id === evaluatorId);
-    return formatFullName(evaluator?.name, (evaluator as any)?.lastName) || evaluatorId || 'N/A';
+    const evaluator = evaluatorById.get(String(evaluatorId));
+    return (
+      formatFullName(evaluator?.name, (evaluator as any)?.lastName || (evaluator as any)?.last_name) ||
+      evaluatorId ||
+      'N/A'
+    );
+  };
+
+  const parseNumber = (value: any) => {
+    if (value === undefined || value === null || value === '') return null;
+    const n = typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const formatPtBrDate = (value: any) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('pt-BR');
   };
 
   const getSellerLabel = (evaluation: any) => {
@@ -367,6 +407,78 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
       return matchesSearch && matchesCompany && matchesStatus && matchesPeriod && matchesSeller;
     })
     .sort((a, b) => new Date(b.scheduledDate).getTime() - new Date(a.scheduledDate).getTime());
+
+  const walletItems: WalletCardItem[] = useMemo(() => {
+    if (viewMode !== 'card') return [];
+    return filteredEvaluations.map((evaluation) => {
+      const companyIdValue = String(evaluation?.companyId || '');
+      const evaluatorIdValue = String(evaluation?.evaluatorId || '');
+      const company = companyById.get(companyIdValue);
+      const evaluator = evaluatorById.get(evaluatorIdValue);
+      const companyName = (company?.name || companyIdValue || 'N/A') as string;
+      const evaluatorName =
+        formatFullName(
+          evaluator?.name,
+          (evaluator as any)?.lastName || (evaluator as any)?.last_name,
+        ) ||
+        evaluatorIdValue ||
+        'N/A';
+
+      const vendorsRaw = (evaluation?.visitData?.vendors ?? '').toString().trim();
+      const sellerLabel =
+        vendorsRaw && vendorsRaw !== '-' && vendorsRaw.toLowerCase() !== 'n/a'
+          ? vendorsRaw
+          : '-';
+
+      const overallScore100 = (() => {
+        const n = parseNumber(evaluation?.aiAnalysis?.overallScore);
+        if (n == null) return null;
+        const normalized = n <= 10 ? n * 10 : n;
+        return Math.round(normalized);
+      })();
+
+      const npsScore = (() => {
+        const n = parseNumber(evaluation?.aiAnalysis?.npsScore);
+        if (n == null) return null;
+        const normalized = n > 10 ? n / 10 : n;
+        return Math.round(normalized);
+      })();
+
+      const metrics: WalletCardItem['metrics'] = [];
+      if (overallScore100 != null) metrics.push({ key: 'overall', label: 'Pontuação Geral', value: `${overallScore100}/100` });
+      if (npsScore != null) metrics.push({ key: 'nps', label: 'NPS', value: String(npsScore) });
+
+      const voucherDone = !!evaluation.voucherValidated;
+      const surveyDone =
+        evaluation.stage === 'survey_submitted' ||
+        !!evaluation.surveyResponseId ||
+        !!evaluation.surveyData?.answers?.length;
+      const audioDone = !!(evaluation.audioPath || evaluation.audioUrl);
+      const aiDone = !!evaluation.aiAnalysis;
+
+      return {
+        id: String(evaluation?.id),
+        companyName,
+        logoUrl: company?.logoUrl || (company as any)?.logo_url,
+        baseColor: company?.cardBaseColor || (company as any)?.card_base_color,
+        dateLabel: formatPtBrDate(evaluation?.scheduledDate),
+        voucherCode: evaluation?.voucherCode,
+        voucherValue: null,
+        evaluatorName,
+        secondaryLabel: 'Vendedor',
+        secondaryValue: sellerLabel,
+        metrics,
+        accentSeed: company?.name || company?.id || String(evaluation?.id || ''),
+        companyDisplay: companyName || 'Empresa',
+        statuses: [
+          { key: 'voucher', label: `Voucher: ${voucherDone ? 'validado' : 'pendente'}`, done: voucherDone, Icon: QrCode },
+          { key: 'survey', label: `Questionário: ${surveyDone ? 'enviado' : 'pendente'}`, done: surveyDone, Icon: FilePenLine },
+          { key: 'audio', label: `Áudio: ${audioDone ? 'enviado' : 'pendente'}`, done: audioDone, Icon: Mic },
+          { key: 'ai', label: `IA: ${aiDone ? 'processada' : 'pendente'}`, done: aiDone, Icon: BrainCog },
+        ],
+      };
+    });
+  }, [companyById, evaluatorById, filteredEvaluations, viewMode]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -532,6 +644,34 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full h-10 pl-10 pr-4 rounded-lg border border-border bg-input text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40 focus:border-primary/50"
               />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setViewMode('card')}
+                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                  viewMode === 'card'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-card text-foreground border-border hover:bg-muted'
+                }`}
+                aria-pressed={viewMode === 'card'}
+              >
+                <LayoutGrid className="w-4 h-4" />
+                <span className="hidden sm:inline">Cards</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-card text-foreground border-border hover:bg-muted'
+                }`}
+                aria-pressed={viewMode === 'list'}
+              >
+                <List className="w-4 h-4" />
+                <span className="hidden sm:inline">Lista</span>
+              </button>
             </div>
           </div>
         </div>
@@ -810,6 +950,13 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                 Agendar Avaliação
               </button>
             )}
+          </div>
+        ) : viewMode === 'card' ? (
+          <div className="space-y-6">
+            <WalletCardStack
+              items={walletItems}
+              onOpen={(id) => onNavigate('evaluation-detail', id)}
+            />
           </div>
         ) : (
           <div className="space-y-4">

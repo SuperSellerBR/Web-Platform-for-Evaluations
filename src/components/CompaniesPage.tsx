@@ -1700,6 +1700,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
           aspectRatio={1}
           targetWidth={512}
           targetHeight={512}
+          circle
           onCancel={() => setLogoCropperFile(null)}
           onCrop={(cropped) => {
             setLogoCropperFile(null);
