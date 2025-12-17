@@ -26,10 +26,18 @@ export function ImageCropperModal({
   const [offsetY, setOffsetY] = useState(50);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState<string>('');
+  const [isDragging, setIsDragging] = useState(false);
   const portalRootRef = useRef<HTMLDivElement | null>(null);
+  const dragStartRef = useRef<{
+    clientX: number;
+    clientY: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   if (typeof document !== 'undefined' && !portalRootRef.current) {
     portalRootRef.current = document.createElement('div');
   }
+  const clampValue = (value: number, min: number, max: number) => Math.min(Math.max(min, value), max);
 
   useEffect(() => {
     const url = URL.createObjectURL(file);
@@ -67,16 +75,24 @@ export function ImageCropperModal({
     const zoomedHeight = cropHeight / scale;
     const maxOffsetX = Math.max(0, imgW - zoomedWidth);
     const maxOffsetY = Math.max(0, imgH - zoomedHeight);
-    const x = (offsetX / 100) * maxOffsetX;
-    const y = (offsetY / 100) * maxOffsetY;
+    const clampedX = Math.min(Math.max(0, offsetX), maxOffsetX);
+    const clampedY = Math.min(Math.max(0, offsetY), maxOffsetY);
 
     return {
-      x,
-      y,
+      x: clampedX,
+      y: clampedY,
       width: zoomedWidth,
       height: zoomedHeight,
+      maxOffsetX,
+      maxOffsetY,
     };
   }, [image, scale, offsetX, offsetY, aspectRatio]);
+
+  useEffect(() => {
+    if (!cropRect) return;
+    setOffsetX((prev) => clampValue(prev, 0, cropRect.maxOffsetX));
+    setOffsetY((prev) => clampValue(prev, 0, cropRect.maxOffsetY));
+  }, [cropRect?.maxOffsetX, cropRect?.maxOffsetY]);
 
   useEffect(() => {
     if (!image || !canvasRef.current || !cropRect) return;
@@ -143,11 +159,55 @@ export function ImageCropperModal({
             <p className="text-sm text-destructive">{error}</p>
           ) : (
             <div className="grid gap-4 lg:grid-cols-[1.2fr,0.8fr]">
-              <canvas
-                ref={canvasRef}
-                className="w-full h-auto max-h-[55vh] rounded-lg border border-border bg-muted/30"
-                style={{ aspectRatio: `${targetWidth} / ${targetHeight}` }}
-              />
+              <div className="relative w-full rounded-lg border border-border bg-muted/30 overflow-hidden">
+                <canvas
+                  ref={canvasRef}
+                  className="w-full h-auto max-h-[55vh]"
+                  style={{ aspectRatio: `${targetWidth} / ${targetHeight}` }}
+                />
+                <div
+                  className={`absolute inset-0 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                  onPointerDown={(event) => {
+                    if (!cropRect) return;
+                    event.preventDefault();
+                    dragStartRef.current = {
+                      clientX: event.clientX,
+                      clientY: event.clientY,
+                      offsetX,
+                      offsetY,
+                    };
+                    setIsDragging(true);
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }}
+                  onPointerMove={(event) => {
+                    if (!isDragging || !dragStartRef.current || !cropRect) return;
+                    const deltaX = event.clientX - dragStartRef.current.clientX;
+                    const deltaY = event.clientY - dragStartRef.current.clientY;
+                    const nextX = dragStartRef.current.offsetX - deltaX;
+                    const nextY = dragStartRef.current.offsetY - deltaY;
+                    if (cropRect.maxOffsetX >= 0) {
+                      setOffsetX(clampValue(nextX, 0, cropRect.maxOffsetX));
+                    }
+                    if (cropRect.maxOffsetY >= 0) {
+                      setOffsetY(clampValue(nextY, 0, cropRect.maxOffsetY));
+                    }
+                  }}
+                  onPointerUp={(event) => {
+                    if (!isDragging) return;
+                    setIsDragging(false);
+                    dragStartRef.current = null;
+                    event.currentTarget.releasePointerCapture?.(event.pointerId);
+                  }}
+                  onPointerCancel={(event) => {
+                    if (!isDragging) return;
+                    setIsDragging(false);
+                    dragStartRef.current = null;
+                    event.currentTarget.releasePointerCapture?.(event.pointerId);
+                  }}
+                >
+                  <span className="sr-only">Arraste a imagem para reposicioná-la</span>
+                </div>
+              </div>
               <div className="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
                 <div>
                   <label className="text-sm text-muted-foreground">Zoom</label>
@@ -162,26 +222,9 @@ export function ImageCropperModal({
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-muted-foreground">Posição horizontal</label>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={offsetX}
-                    onChange={(e) => setOffsetX(Number(e.target.value))}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm text-muted-foreground">Posição vertical</label>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={offsetY}
-                    onChange={(e) => setOffsetY(Number(e.target.value))}
-                    className="w-full"
-                  />
+                  <p className="text-sm text-muted-foreground">
+                    Arraste a imagem para ajustar a posição horizontal e vertical dentro do quadro, os controles serão aplicados automaticamente.
+                  </p>
                 </div>
               </div>
             </div>
