@@ -1,0 +1,5 @@
+ALTER TABLE public.surveys          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.survey_sections  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.survey_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.survey_responses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.survey_answers   ENABLE ROW LEVEL SECURITY;
