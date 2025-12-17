@@ -23,7 +23,9 @@ import {
   PolarRadiusAxis,
 } from 'recharts';
 import servirHeader from '../../assets/SERVIR.png';
+import servirHeaderDark from '../../assets/SERVIRW.png';
 import goldHeader from '../../assets/GOLD.png';
+import { useTheme } from '../utils/theme';
 
 interface DashboardProps {
   user: any;
@@ -60,6 +62,15 @@ type Summary = {
 
 const SELLER_MATCH_STOPWORDS = new Set(['da', 'de', 'do', 'dos', 'das', 'e']);
 
+const readCssVar = (name: string, fallback: string) => {
+  if (typeof window === 'undefined') return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name);
+  return value?.trim() || fallback;
+};
+
+const mixColor = (color: string, opacity: number) =>
+  `color-mix(in srgb, ${color} ${Math.round(opacity * 100)}%, transparent)`;
+
 export function Dashboard({ user, accessToken, onNavigate, onLogout }: DashboardProps) {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,6 +101,38 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
   const [periodPreset, setPeriodPreset] = useState<'all' | 'last1w' | 'last4w' | 'custom'>('all');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [logoError, setLogoError] = useState(false);
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
+
+  const themeColors = useMemo(
+    () => ({
+      primary: readCssVar('--color-primary', '#1d4ed8'),
+      primaryFg: readCssVar('--color-primary-foreground', '#ffffff'),
+      foreground: readCssVar('--color-foreground', '#111827'),
+      muted: readCssVar('--color-muted-foreground', '#6b7280'),
+      card: readCssVar('--color-card', '#ffffff'),
+      border: readCssVar('--color-border', '#e5e7eb'),
+      background: readCssVar('--color-background', '#f8fafc'),
+      chart1: readCssVar('--color-chart-1', '#2563eb'),
+      chart2: readCssVar('--color-chart-2', '#22c55e'),
+      chart3: readCssVar('--color-chart-3', '#f59e0b'),
+      chart4: readCssVar('--color-chart-4', '#ef4444'),
+      chart5: readCssVar('--color-chart-5', '#8b5cf6'),
+    }),
+    [resolvedTheme]
+  );
+
+  const servirPalette = useMemo(() => {
+    const bases = [themeColors.chart1, themeColors.chart2, themeColors.chart3, themeColors.chart4, themeColors.chart5, themeColors.chart2];
+    const keys = ['S', 'E', 'R', 'V', 'I', 'R_REL'];
+    return keys.reduce<Record<string, { fill: string; stroke: string }>>((acc, key, idx) => {
+      const color = bases[idx % bases.length];
+      acc[key] = { fill: mixColor(color, 0.55), stroke: color };
+      return acc;
+    }, {});
+  }, [themeColors.chart1, themeColors.chart2, themeColors.chart3, themeColors.chart4, themeColors.chart5]);
+
+  const servirHeaderSrc = resolvedTheme === 'dark' ? servirHeaderDark : servirHeader;
 
   const getEvaluationSellerLabel = (evaluation: any) => {
     const label =
@@ -678,19 +721,6 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
     if (timeline.length > 0) setTimelineData(timeline);
   }, [timelineData.length, summary]);
 
-  const cards = useMemo(() => {
-    if (!summary) return [];
-    return [
-      { label: 'Pontuação Geral', value: summary.averages.overall ?? '-', accent: 'text-blue-700' },
-      { label: 'SERVIR', value: summary.averages.servir ?? '-', accent: 'text-emerald-700' },
-      { label: 'GOLD', value: summary.averages.gold ?? '-', accent: 'text-amber-700' },
-      { label: 'NPS', value: summary.averages.nps ?? '-', accent: 'text-purple-700' },
-      { label: 'Avaliações concluídas', value: summary.counts.completed, accent: 'text-slate-700' },
-      { label: 'Agendadas', value: summary.counts.scheduled, accent: 'text-slate-700' },
-      { label: 'Atrasadas', value: summary.counts.late, accent: 'text-red-700' },
-    ];
-  }, [summary]);
-
   const sellerOptions = useMemo(() => {
     const ids = new Set(sellerIdsWithEvaluations.map((id) => String(id)));
     const options = teamMembers.filter((m: any) => ids.has(String(m?.id)));
@@ -758,25 +788,15 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
     return Object.entries(summary.goldPillars).map(([k, v]) => ({ name: k.toUpperCase(), value: v ?? 0 }));
   }, [summary]);
 
-  const COLORS = ['#2563eb', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6'];
-
   const servirRadialData = useMemo(() => {
     if (!summary) return [];
-    const palette: Record<string, { fill: string; stroke: string }> = {
-      S: { fill: 'rgba(37, 99, 235, 0.55)', stroke: 'rgba(37, 99, 235, 0.9)' },
-      E: { fill: 'rgba(34, 197, 94, 0.55)', stroke: 'rgba(34, 197, 94, 0.9)' },
-      R: { fill: 'rgba(245, 158, 11, 0.55)', stroke: 'rgba(245, 158, 11, 0.9)' },
-      V: { fill: 'rgba(239, 68, 68, 0.55)', stroke: 'rgba(239, 68, 68, 0.9)' },
-      I: { fill: 'rgba(139, 92, 246, 0.55)', stroke: 'rgba(139, 92, 246, 0.9)' },
-      R_REL: { fill: 'rgba(20, 184, 166, 0.55)', stroke: 'rgba(20, 184, 166, 0.9)' },
-    };
 
     const entries = Object.entries(summary.pillars).map(([key, value]) => {
       const label = key.toUpperCase() === 'R_REL' ? 'R REL' : key.toUpperCase();
       const scoreRaw = typeof value === 'number' ? value : parseFloat(String(value ?? 0));
       const score = Number.isFinite(scoreRaw) ? (scoreRaw <= 10 ? scoreRaw * 10 : scoreRaw) : 0;
       const colorKey = label === 'R REL' ? 'R_REL' : label;
-      const color = palette[colorKey] || palette.S;
+      const color = servirPalette[colorKey] || servirPalette.S;
       return { pillar: label, score, fill: color.fill, stroke: color.stroke };
     });
 
@@ -791,7 +811,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
     });
 
     return entries;
-  }, [summary]);
+  }, [servirPalette, summary]);
 
   const renderServirAngleTick = useMemo(() => {
     const formatLabel = (v: string) => (v === 'R REL' ? 'Rʳᵉˡ' : v);
@@ -819,7 +839,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
           y={y}
           textAnchor="middle"
           dominantBaseline="middle"
-          fill="#6b7280"
+          fill={themeColors.muted}
           fontSize={11}
           transform={`rotate(${rotate}, ${x}, ${y})`}
         >
@@ -827,7 +847,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
         </text>
       );
     };
-  }, [SERVIR_END_ANGLE, SERVIR_START_ANGLE, servirRadialData.length]);
+  }, [SERVIR_END_ANGLE, SERVIR_START_ANGLE, servirRadialData.length, themeColors.muted]);
 
   const renderGoldBarLabel = (props: any) => {
     const { x, y, width, height, value } = props || {};
@@ -846,7 +866,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
         y={yPos}
         textAnchor="middle"
         dominantBaseline="middle"
-        fill="#ffffff"
+        fill={themeColors.primaryFg}
         fontSize={12}
         fontWeight={700}
         style={{ pointerEvents: 'none' }}
@@ -909,21 +929,21 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
 
   return (
     <Layout user={user} currentPage="dashboard" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+      <div className={`max-w-7xl mx-auto space-y-4 sm:space-y-6 ${isDark ? 'evaluation-dark' : ''}`}>
         <div className="flex items-start justify-between gap-4 overflow-hidden">
           <div className="min-w-0 flex-1">
-            <h2 className="text-gray-900 mb-2">Dashboard</h2>
+            <h2 className="text-foreground mb-2">Dashboard</h2>
             <div className="mt-1 flex items-center gap-3 min-w-0 overflow-hidden">
               <button
                 type="button"
                 onClick={() => setFiltersOpen(true)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-white hover:bg-gray-50"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-foreground hover:bg-muted"
                 aria-label="Filtros"
                 title="Filtros"
               >
                 <SlidersHorizontal className="h-5 w-5" />
               </button>
-              <div className="flex-1 min-w-0 text-sm text-gray-600 leading-tight">
+              <div className="flex-1 min-w-0 text-sm text-muted-foreground leading-tight">
                 <p className="truncate">{filtersSummary.periodLabel}</p>
                 <p className="truncate">{filtersSummary.sellerLabel}</p>
               </div>
@@ -933,7 +953,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
           <div className="shrink-0">
             {selectedCompanyLogoUrl && !logoError ? (
               <div
-                className="rounded-full border border-gray-200 bg-white flex items-center justify-center"
+                className="rounded-full border border-border bg-card flex items-center justify-center"
                 style={{ width: 73, height: 73 }}
               >
                 <img
@@ -947,7 +967,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
               </div>
             ) : (
               <div
-                className="rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-500"
+                className="rounded-full border border-border bg-card flex items-center justify-center text-muted-foreground"
                 style={{ width: 73, height: 73 }}
               >
                 <Globe style={{ width: 62, height: 62 }} />
@@ -958,32 +978,32 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
 
         {filtersOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
             onClick={() => setFiltersOpen(false)}
           >
             <div
-              className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+              className="bg-card text-foreground border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3">
+              <div className="sticky top-0 bg-card border-b border-border px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-gray-900">Filtros do dashboard</h3>
+                  <h3 className="text-foreground">Filtros do dashboard</h3>
                   <button
                     type="button"
                     onClick={() => setFiltersOpen(false)}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="p-2 hover:bg-muted rounded-lg"
                     aria-label="Fechar"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
-                <p className="text-sm text-gray-600 mt-1">Defina o período e os responsáveis para refinar os dados.</p>
+                <p className="text-sm text-muted-foreground mt-1">Defina o período e os responsáveis para refinar os dados.</p>
               </div>
 
               <div className="p-4 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-500">Data inicial</span>
+                    <span className="text-xs text-muted-foreground">Data inicial</span>
                     <input
                       type="date"
                       value={fromDate}
@@ -991,11 +1011,11 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                         setFromDate(e.target.value);
                         setPeriodPreset('custom');
                       }}
-                      className="border rounded px-3 py-2"
+                      className="border border-border bg-input-background text-foreground rounded px-3 py-2"
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-500">Data final</span>
+                    <span className="text-xs text-muted-foreground">Data final</span>
                     <input
                       type="date"
                       value={toDate}
@@ -1003,7 +1023,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                         setToDate(e.target.value);
                         setPeriodPreset('custom');
                       }}
-                      className="border rounded px-3 py-2"
+                      className="border border-border bg-input-background text-foreground rounded px-3 py-2"
                     />
                   </div>
                 </div>
@@ -1012,7 +1032,9 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                   <button
                     onClick={applyLastWeek}
                     className={`px-3 py-2 rounded text-sm border ${
-                      periodPreset === 'last1w' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white'
+                      periodPreset === 'last1w'
+                        ? 'bg-primary/10 border-primary/30 text-primary'
+                        : 'bg-card border-border text-foreground hover:bg-muted'
                     }`}
                   >
                     Última semana
@@ -1020,7 +1042,9 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                   <button
                     onClick={applyLast4Weeks}
                     className={`px-3 py-2 rounded text-sm border ${
-                      periodPreset === 'last4w' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white'
+                      periodPreset === 'last4w'
+                        ? 'bg-primary/10 border-primary/30 text-primary'
+                        : 'bg-card border-border text-foreground hover:bg-muted'
                     }`}
                   >
                     Últimas 4 semanas
@@ -1028,7 +1052,9 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                   <button
                     onClick={clearPeriod}
                     className={`px-3 py-2 rounded text-sm border ${
-                      periodPreset === 'all' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white'
+                      periodPreset === 'all'
+                        ? 'bg-primary/10 border-primary/30 text-primary'
+                        : 'bg-card border-border text-foreground hover:bg-muted'
                     }`}
                   >
                     Todo o período
@@ -1038,11 +1064,11 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {!hideCompanyFilter && (
                     <div className="flex flex-col gap-1">
-                      <span className="text-xs text-gray-500">Empresa</span>
+                      <span className="text-xs text-muted-foreground">Empresa</span>
                       <select
                         value={companyId}
                         onChange={(e) => setCompanyId(e.target.value)}
-                        className="border rounded px-3 py-2"
+                        className="border border-border bg-input-background text-foreground rounded px-3 py-2"
                       >
                         <option value="">Todas as empresas</option>
                         {companies.map((c: any) => (
@@ -1055,11 +1081,11 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                   )}
                   {!hideSellerFilter && (
                     <div className="flex flex-col gap-1">
-                      <span className="text-xs text-gray-500">Vendedor/Gerente</span>
+                      <span className="text-xs text-muted-foreground">Vendedor/Gerente</span>
                       <select
                         value={sellerId}
                         onChange={(e) => setSellerId(e.target.value)}
-                        className="border rounded px-3 py-2"
+                        className="border border-border bg-input-background text-foreground rounded px-3 py-2"
                       >
                         <option value="">Todos os colaboradores</option>
                         {sellerOptions.map((m: any) => (
@@ -1076,7 +1102,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                   <button
                     type="button"
                     onClick={() => setFiltersOpen(false)}
-                    className="rounded-lg border bg-white px-4 py-2 hover:bg-gray-50"
+                    className="rounded-lg border border-border bg-card text-foreground px-4 py-2 hover:bg-muted"
                   >
                     Fechar
                   </button>
@@ -1088,7 +1114,7 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
 
         {loading && (
           <div className="flex items-center justify-center py-8">
-            <div className="animate-spin h-10 w-10 border-b-2 border-blue-600 rounded-full" />
+            <div className="animate-spin h-10 w-10 border-b-2 border-primary rounded-full" />
           </div>
         )}
         {error && <div className="text-sm text-red-600">{error}</div>}
@@ -1096,76 +1122,83 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
         {summary && !loading && (
           <div className="space-y-6">
 	            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-	              <div className="bg-white shadow rounded-lg p-4">
-	                <p className="text-sm text-gray-500">Pontuação Geral</p>
+	              <div className="bg-card border border-border shadow-sm rounded-lg p-4">
+	                <p className="text-sm text-muted-foreground">Pontuação Geral</p>
 	                <div className="flex items-center justify-between gap-3 mt-1">
-	                  <p className="text-2xl sm:text-3xl font-bold text-blue-700">
+	                  <p className="text-2xl sm:text-3xl font-bold text-primary">
 	                    {overallScore100 != null ? overallScore100 : '--'}
-	                    <span className="text-xs text-gray-500 ml-1">/100</span>
+	                    <span className="text-xs text-muted-foreground ml-1">/100</span>
 	                  </p>
 	                  {OverallScoreIcon && (
-	                    <span className="text-gray-900" style={{ flexShrink: 0 }} aria-hidden>
+	                    <span className="text-foreground" style={{ flexShrink: 0 }} aria-hidden>
 	                      <OverallScoreIcon className="w-6 h-6" />
 	                    </span>
 	                  )}
 	                </div>
 	              </div>
-	              <div className="bg-white shadow rounded-lg p-4">
-	                <p className="text-sm text-gray-500">NPS</p>
+	              <div className="bg-card border border-border shadow-sm rounded-lg p-4">
+	                <p className="text-sm text-muted-foreground">NPS</p>
 	                <div className="flex items-center justify-between gap-3 mt-1">
-	                  <p className="text-2xl sm:text-3xl font-bold text-purple-700">{computedNps != null ? computedNps : '--'}</p>
+	                  <p className="text-2xl sm:text-3xl font-bold text-primary">{computedNps != null ? computedNps : '--'}</p>
 	                  {NpsIcon && (
-	                    <span className="text-gray-900" style={{ flexShrink: 0 }} aria-hidden>
+	                    <span className="text-foreground" style={{ flexShrink: 0 }} aria-hidden>
 	                      <NpsIcon className="w-6 h-6" />
 	                    </span>
 	                  )}
 	                </div>
 	              </div>
-              <div className="bg-white shadow rounded-lg p-4">
-                <p className="text-sm text-gray-500">Média SERVIR</p>
-                <p className="text-2xl sm:text-3xl font-bold text-blue-600">
+              <div className="bg-card border border-border shadow-sm rounded-lg p-4">
+                <p className="text-sm text-muted-foreground">Média SERVIR</p>
+                <p className="text-2xl sm:text-3xl font-bold text-primary">
                   {summary.averages.servir != null ? summary.averages.servir.toFixed(1) : '--'}
                 </p>
               </div>
-              <div className="bg-white shadow rounded-lg p-4">
-                <p className="text-sm text-gray-500">Média GOLD</p>
-                <p className="text-2xl sm:text-3xl font-bold text-amber-600">
+              <div className="bg-card border border-border shadow-sm rounded-lg p-4">
+                <p className="text-sm text-muted-foreground">Média GOLD</p>
+                <p className="text-2xl sm:text-3xl font-bold text-primary">
                   {summary.averages.gold != null ? summary.averages.gold.toFixed(1) : '--'}
                 </p>
               </div>
             </div>
 
 	            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-	              <div className="bg-white shadow rounded-lg p-4">
+	              <div className="bg-card border border-border shadow-sm rounded-lg p-4">
 	                <img
-	                  src={servirHeader}
+	                  src={servirHeaderSrc}
 	                  alt="Metodologia SERVIR"
 	                  className="block mb-2 h-auto"
 	                  style={{ width: '37.5%' }}
 	                  loading="lazy"
 	                />
-	                <ResponsiveContainer width="100%" height={260}>
-	                  <RadialBarChart
-	                    data={servirRadialData}
-	                    layout="centric"
+                <ResponsiveContainer width="100%" height={260}>
+                  <RadialBarChart
+                    data={servirRadialData}
+                    layout="centric"
                     innerRadius={0}
                     outerRadius="80%"
                     startAngle={SERVIR_START_ANGLE}
                     endAngle={SERVIR_END_ANGLE}
                   >
-                    <PolarGrid gridType="circle" radialLines />
+                    <PolarGrid gridType="circle" radialLines stroke={mixColor(themeColors.muted, 0.35)} />
                     <PolarAngleAxis dataKey="pillar" axisLine={false} tickLine={false} tick={renderServirAngleTick} />
-                    <PolarRadiusAxis domain={[0, 100]} tickCount={6} angle={90} />
+                    <PolarRadiusAxis domain={[0, 100]} tickCount={6} angle={90} tick={{ fill: themeColors.muted, fontSize: 11 }} />
                     <RadialBar dataKey="score" cornerRadius={4}>
                       {servirRadialData.map((entry, index) => (
                         <Cell key={`${entry.pillar}-${index}`} fill={entry.fill} stroke={entry.stroke} strokeWidth={1} />
                       ))}
                     </RadialBar>
-                    <Tooltip />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: themeColors.card,
+                        borderColor: themeColors.border,
+                        color: themeColors.foreground,
+                      }}
+                      labelStyle={{ color: themeColors.muted }}
+                    />
                   </RadialBarChart>
                 </ResponsiveContainer>
               </div>
-              <div className="bg-white shadow rounded-lg p-4">
+              <div className="bg-card border border-border shadow-sm rounded-lg p-4">
                 <img
                   src={goldHeader}
                   alt="Dimensões GOLD"
@@ -1175,19 +1208,33 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
 	                />
 		                <ResponsiveContainer width="100%" height={260}>
 		                  <BarChart data={goldBars}>
-		                    <XAxis dataKey="name" axisLine={false} tickLine={false} />
+		                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: themeColors.muted }} />
 	                    <YAxis domain={[0, 10]} axisLine={false} tickLine={false} tick={false} width={0} />
-	                    <Tooltip />
-	                    <Bar dataKey="value" fill="#f59e0b" radius={[4, 4, 0, 0]} label={renderGoldBarLabel} />
+	                    <Tooltip
+                        contentStyle={{
+                          backgroundColor: themeColors.card,
+                          borderColor: themeColors.border,
+                          color: themeColors.foreground,
+                        }}
+                        labelStyle={{ color: themeColors.muted }}
+                      />
+	                    <Bar
+                        dataKey="value"
+                        fill={themeColors.chart3}
+                        stroke={themeColors.chart3}
+                        fillOpacity={0.72}
+                        radius={[4, 4, 0, 0]}
+                        label={renderGoldBarLabel}
+                      />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            <div className="bg-white shadow rounded-lg p-4">
-              <p className="text-sm font-semibold text-gray-700 mb-3">Evolução da nota geral</p>
+            <div className="bg-card border border-border shadow-sm rounded-lg p-4">
+              <p className="text-sm font-semibold text-foreground mb-3">Evolução da nota geral</p>
               {timelinePlotData.length === 0 ? (
-                <p className="text-sm text-gray-500">Nenhum dado disponível.</p>
+                <p className="text-sm text-muted-foreground">Nenhum dado disponível.</p>
               ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <LineChart data={timelinePlotData}>
@@ -1195,15 +1242,21 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                       dataKey="label"
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fontSize: 12, fill: '#6b7280' }}
+                      tick={{ fontSize: 12, fill: themeColors.muted }}
                     />
                     <YAxis
                       domain={[0, 100]}
                       tickLine={false}
                       axisLine={false}
-                      tick={{ fontSize: 12, fill: '#6b7280' }}
+                      tick={{ fontSize: 12, fill: themeColors.muted }}
                     />
                     <Tooltip
+                      contentStyle={{
+                        backgroundColor: themeColors.card,
+                        borderColor: themeColors.border,
+                        color: themeColors.foreground,
+                      }}
+                      labelStyle={{ color: themeColors.muted }}
                       formatter={(value: any) => (typeof value === 'number' ? value.toFixed(1) : value)}
                       labelFormatter={(label) => `Data: ${label}`}
                     />
@@ -1211,10 +1264,10 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                       type="monotone"
                       dataKey="overall"
                       name="Geral"
-                      stroke="#1d4ed8"
+                      stroke={themeColors.primary}
                       strokeWidth={2.2}
-                      dot={{ r: 4, strokeWidth: 1.5, stroke: '#1d4ed8', fill: '#ffffff' }}
-                      activeDot={{ r: 5.5, strokeWidth: 2, stroke: '#1d4ed8', fill: '#ffffff' }}
+                      dot={{ r: 4, strokeWidth: 1.5, stroke: themeColors.primary, fill: themeColors.card }}
+                      activeDot={{ r: 5.5, strokeWidth: 2, stroke: themeColors.primary, fill: themeColors.card }}
                       connectNulls
                     />
                   </LineChart>
@@ -1222,9 +1275,9 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
               )}
             </div>
 
-            <div className="bg-white shadow rounded-lg p-4">
-              <p className="text-sm font-semibold text-gray-700 mb-3">Últimas avaliações</p>
-              <div className="space-y-3 text-sm text-gray-700">
+            <div className="bg-card border border-border shadow-sm rounded-lg p-4">
+              <p className="text-sm font-semibold text-foreground mb-3">Últimas avaliações</p>
+              <div className="space-y-3 text-sm text-foreground">
                 {summary.recentEvaluations.length === 0 && <p>Nenhuma avaliação concluída.</p>}
                 {summary.recentEvaluations.map((e) => {
                   const companyName = companies.find((c) => c.id === e.companyId)?.name || e.companyId;
@@ -1233,30 +1286,40 @@ export function Dashboard({ user, accessToken, onNavigate, onLogout }: Dashboard
                     <button
                       key={e.id}
                       onClick={() => onNavigate('evaluation-detail', e.id)}
-                      className="block w-full text-left rounded-lg px-2 py-2 hover:bg-gray-50 transition"
+                      className="block w-full text-left rounded-lg px-2 py-2 hover:bg-muted transition"
                     >
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 items-start">
                       <div>
-                        <p className="font-semibold text-gray-800">{companyName}</p>
-                        <p className="text-xs text-gray-500">
+                        <p className="font-semibold text-foreground">{companyName}</p>
+                        <p className="text-xs text-muted-foreground">
                           {new Date(e.scheduledDate).toLocaleDateString('pt-BR')} • {e.status}
                         </p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-muted-foreground">
                           Vendedor: {sellerLabel}
                         </p>
                       </div>
                         <div className="flex items-center gap-2 text-xs overflow-x-auto">
-                          <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2 py-1">
-                            <span className="text-gray-600">Geral</span>
-                            <span className="font-semibold text-gray-900">{e.overall ?? '-'}</span>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">
+                            <span className="text-muted-foreground">Geral</span>
+                            <span className="font-semibold text-foreground">{e.overall ?? '-'}</span>
                           </span>
-                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1">
-                            <span className="text-blue-700">SERVIR</span>
-                            <span className="font-semibold text-blue-900">{e.servir ?? '-'}</span>
+                          <span className="inline-flex items-center gap-1 rounded-full px-2 py-1"
+                            style={{
+                              backgroundColor: mixColor(themeColors.chart1, 0.1),
+                              color: themeColors.chart1,
+                            }}
+                          >
+                            <span className="font-semibold" style={{ color: themeColors.chart1 }}>SERVIR</span>
+                            <span className="font-semibold" style={{ color: themeColors.chart1 }}>{e.servir ?? '-'}</span>
                           </span>
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1">
-                            <span className="text-amber-700">GOLD</span>
-                            <span className="font-semibold text-amber-900">{e.gold ?? '-'}</span>
+                          <span className="inline-flex items-center gap-1 rounded-full px-2 py-1"
+                            style={{
+                              backgroundColor: mixColor(themeColors.chart3, 0.12),
+                              color: themeColors.chart3,
+                            }}
+                          >
+                            <span className="font-semibold" style={{ color: themeColors.chart3 }}>GOLD</span>
+                            <span className="font-semibold" style={{ color: themeColors.chart3 }}>{e.gold ?? '-'}</span>
                           </span>
                         </div>
                       </div>

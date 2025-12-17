@@ -4,6 +4,8 @@ import { BrainCog, ClipboardList, FilePenLine, FileText, Mic, QrCode } from 'luc
 import { projectId } from '../utils/supabase/info';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { WalletCardItem, WalletCardStack } from './WalletCardStack';
+import { formatFullName } from '../utils/name';
+import { useTheme } from '../utils/theme';
 
 interface MyEvaluationsPageProps {
   user: any;
@@ -28,8 +30,10 @@ function StatusIconButton(props: {
       <TooltipTrigger asChild>
         <button
           type="button"
-          className={`inline-flex items-center justify-center h-9 w-9 rounded-full border ${
-            done ? 'bg-green-50 border-green-200 text-green-600' : 'bg-gray-100 border-gray-200 text-gray-400'
+          className={`inline-flex items-center justify-center h-9 w-9 rounded-full border transition-colors ${
+            done
+              ? 'bg-green-50 border-green-200 text-green-600 dark:bg-green-500/15 dark:border-green-500/30 dark:text-green-100'
+              : 'bg-muted border-border text-muted-foreground dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300'
           }`}
           aria-label={aria}
           data-no-nav
@@ -49,10 +53,13 @@ function StatusIconButton(props: {
 }
 
 export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: MyEvaluationsPageProps) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
   const [evaluations, setEvaluations] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusTooltipOpen, setStatusTooltipOpen] = useState<string | null>(null);
+  const [evaluatorInfo, setEvaluatorInfo] = useState<any | null>(null);
 
   useEffect(() => {
     if (!statusTooltipOpen) return;
@@ -70,16 +77,28 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
     try {
       const headers = { 'Authorization': `Bearer ${accessToken}` };
 
-      const [evaluationsRes, companiesRes] = await Promise.all([
+      const evaluatorPromise = user.evaluatorId
+        ? fetch(
+            `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluators/${user.evaluatorId}`,
+            { headers }
+          )
+        : null;
+
+      const [evaluationsRes, companiesRes, evaluatorRes] = await Promise.all([
         fetch(
           `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations?evaluatorId=${user.evaluatorId}`,
           { headers }
         ),
         fetch(`https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies`, { headers }),
+        evaluatorPromise ?? Promise.resolve(null),
       ]);
 
       const evaluationsData = await evaluationsRes.json();
       const companiesData = await companiesRes.json();
+      if (evaluatorRes) {
+        const evaluatorData = await evaluatorRes.json();
+        if (evaluatorData?.evaluator) setEvaluatorInfo(evaluatorData.evaluator);
+      }
 
       setEvaluations(evaluationsData.evaluations || []);
       setCompanies(companiesData.companies || []);
@@ -124,6 +143,33 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
     .filter(e => e.status === 'completed')
     .sort((a, b) => new Date(b.completedAt || b.updatedAt || b.scheduledDate).getTime() - new Date(a.completedAt || a.updatedAt || a.scheduledDate).getTime());
 
+  const resolveEvaluatorFullName = () => {
+    const evalObj = (pendingEvaluations[0] || completedEvaluations[0]) || {};
+    const evalName =
+      evalObj?.evaluator?.name ||
+      evalObj?.evaluatorName ||
+      evalObj?.evaluator_name ||
+      evalObj?.name;
+    const evalLast =
+      evalObj?.evaluator?.lastName ||
+      evalObj?.evaluatorLastName ||
+      evalObj?.evaluator_last_name ||
+      evalObj?.lastName;
+    const lastName =
+      evaluatorInfo?.lastName ||
+      evaluatorInfo?.last_name ||
+      evalLast ||
+      user.lastName ||
+      (user as any)?.user_metadata?.lastName ||
+      (user as any)?.user_metadata?.last_name;
+    const firstName =
+      evaluatorInfo?.name ||
+      evalName ||
+      user.name ||
+      (user as any)?.user_metadata?.name;
+    return formatFullName(firstName, lastName) || firstName || '';
+  };
+
   const walletItems: WalletCardItem[] = pendingEvaluations.map((evaluation) => {
     const company = getCompany(evaluation.companyId);
     const maskedId = user?.id ? `***** ${String(user.id).slice(-5)}` : undefined;
@@ -141,8 +187,10 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
       logoUrl: company?.logoUrl,
       dateLabel: new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR'),
       voucherCode: evaluation.voucherCode,
-      voucherValue: parseNumber(company?.voucherValue ?? evaluation.voucherValue ?? evaluation.visitData?.voucherValue),
-      evaluatorName: user.name,
+      voucherValue: parseNumber(
+        evaluation.voucherValue ?? evaluation.visitData?.voucherValue ?? company?.voucherValue
+      ),
+      evaluatorName: resolveEvaluatorFullName(),
       maskedId,
       accentSeed: company?.name || company?.id || String(evaluation.id),
       companyDisplay: company?.name || 'Empresa',
@@ -157,28 +205,28 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
 
   return (
     <Layout user={user} currentPage="my-evaluations" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="max-w-7xl mx-auto">
+      <div className={`max-w-7xl mx-auto text-foreground ${isDark ? 'evaluation-dark' : ''}`}>
         <div className="mb-6 sm:mb-8">
-          <h2 className="text-gray-900 mb-2">Minhas Avaliações</h2>
-          <p className="text-gray-600">Veja suas avaliações pendentes e concluídas</p>
+          <h2 className="text-foreground mb-2">Minhas Avaliações</h2>
+          <p className="text-muted-foreground">Veja suas avaliações pendentes e concluídas</p>
         </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
         ) : evaluations.length === 0 ? (
-          <div className="text-center py-10 sm:py-12 bg-white rounded-lg shadow-md">
-            <ClipboardList className="w-12 h-12 sm:w-16 sm:h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-gray-900 mb-2">Nenhuma avaliação atribuída</h3>
-            <p className="text-gray-600">Aguarde novas atribuições de avaliação</p>
+          <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-md">
+            <ClipboardList className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Nenhuma avaliação atribuída</h3>
+            <p className="text-muted-foreground">Aguarde novas atribuições de avaliação</p>
           </div>
         ) : (
           <div className="space-y-8">
             {/* Pending Evaluations */}
             {pendingEvaluations.length > 0 && (
               <div>
-                <h3 className="text-gray-900 mb-4">Pendentes ({pendingEvaluations.length})</h3>
+                <h3 className="text-foreground mb-4">Pendentes ({pendingEvaluations.length})</h3>
                 <WalletCardStack
                   items={walletItems}
                   onOpen={(id) => onNavigate('evaluation-detail', id)}
@@ -189,7 +237,7 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
             {/* Completed Evaluations */}
             {completedEvaluations.length > 0 && (
               <div>
-                <h3 className="text-gray-900 mb-4">Concluídas ({completedEvaluations.length})</h3>
+                <h3 className="text-foreground mb-4">Concluídas ({completedEvaluations.length})</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {completedEvaluations.map((evaluation) => {
                     const company = getCompany(evaluation.companyId);
@@ -222,16 +270,16 @@ export function MyEvaluationsPage({ user, accessToken, onNavigate, onLogout }: M
                             onNavigate('evaluation-detail', evaluation.id);
                           }
                         }}
-                        className="bg-white rounded-lg shadow-md p-4 sm:p-6 hover:shadow-lg transition-shadow text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                        className="bg-card border border-border rounded-lg shadow-md p-4 sm:p-6 hover:shadow-lg hover:shadow-primary/10 transition-shadow text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30"
                       >
                         <div className="flex flex-wrap items-start justify-between gap-4 mb-3">
                           <div className="flex items-center gap-2 min-w-0">
-                            <div className="bg-green-100 rounded-lg p-2 shrink-0">
-                              <FileText className="w-5 h-5 text-green-600" />
+                            <div className="bg-green-100 dark:bg-green-500/15 rounded-lg p-2 shrink-0">
+                              <FileText className="w-5 h-5 text-green-600 dark:text-green-200" />
                             </div>
                             <div className="min-w-0">
-                              <h4 className="text-gray-900">{company?.name || 'N/A'}</h4>
-                              <p className="text-sm text-gray-600">
+                              <h4 className="text-foreground">{company?.name || 'N/A'}</h4>
+                              <p className="text-sm text-muted-foreground">
                                 {new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR')}
                               </p>
                             </div>

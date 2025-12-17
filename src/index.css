@@ -55,7 +55,7 @@
 }
 
 @layer theme {
-  :root, :host {
+:root, :host {
     --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     --color-red-50: oklch(.971 .013 17.38);
@@ -136,6 +136,56 @@
     --default-mono-font-variation-settings: var(--font-mono--font-variation-settings);
   }
 }
+
+/* Tema escuro dedicado à página de detalhes/Questionário */
+.evaluation-dark {
+  background-color: transparent;
+  color: #e2e8f0;
+}
+
+.evaluation-dark .bg-white,
+.evaluation-dark .bg-gray-50,
+.evaluation-dark .bg-gray-100,
+.evaluation-dark .bg-card {
+  background-color: #0f172a !important;
+  color: #e2e8f0 !important;
+}
+
+.evaluation-dark .text-gray-900,
+.evaluation-dark .text-gray-800,
+.evaluation-dark .text-gray-700 {
+  color: #e2e8f0 !important;
+}
+
+.evaluation-dark .text-gray-600,
+.evaluation-dark .text-gray-500,
+.evaluation-dark .text-muted-foreground {
+  color: #cbd5e1 !important;
+}
+
+.evaluation-dark .border,
+.evaluation-dark .border-gray-200,
+.evaluation-dark .border-gray-300,
+.evaluation-dark .border-border {
+  border-color: #1f2937 !important;
+}
+
+.evaluation-dark input,
+.evaluation-dark textarea,
+.evaluation-dark select,
+.evaluation-dark .bg-muted {
+  background-color: #0b1528 !important;
+  color: #e2e8f0 !important;
+  border-color: #1f2937 !important;
+}
+
+.evaluation-dark .shadow-sm,
+.evaluation-dark .shadow,
+.evaluation-dark .shadow-md,
+.evaluation-dark .shadow-lg {
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4) !important;
+}
+
 
 @layer base {
   *, :after, :before, ::backdrop {
@@ -1770,5 +1820,44 @@ html {
 @keyframes pulse {
   50% {
     opacity: .5;
+  }
+}
+
+/* Loading dots used in submit buttons */
+.loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.loading-dots span {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 9999px;
+  background-color: currentColor;
+  opacity: 0.35;
+  animation: loading-dots-pulse 1.1s ease-in-out infinite;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes loading-dots-pulse {
+  0%, 20% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
   }
 }

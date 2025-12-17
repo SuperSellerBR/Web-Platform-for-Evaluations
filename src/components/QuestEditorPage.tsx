@@ -133,20 +133,20 @@ export function QuestEditorPage({ user, accessToken, onNavigate, onLogout }: Pro
 
   return (
     <Layout user={user} currentPage="quest-editor" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-2">
+      <div className="bg-card border border-border rounded-lg shadow-sm p-2">
         {editing ? (
           <>
             <div className="flex justify-end gap-2 mb-3">
               <button
                 onClick={() => setEditing(null)}
-                className="px-4 py-2 rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50"
+                className="px-4 py-2 rounded-md border border-border text-foreground hover:bg-muted"
               >
                 Voltar
               </button>
               <button
                 onClick={() => handleSave(editing)}
                 disabled={saving}
-                className="px-4 py-2 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
+                className="px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
               >
                 {saving ? "Salvando..." : "Salvar"}
               </button>

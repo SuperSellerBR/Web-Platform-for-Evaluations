@@ -13,7 +13,10 @@ app.use("*", logger(console.log));
 
 // Supabase client
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+if (!supabaseServiceKey) {
+  console.error("SUPABASE_SERVICE_ROLE_KEY is not set");
+}
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // Storage bucket setup
@@ -23,6 +26,55 @@ const bucketExists = buckets?.some((bucket) => bucket.name === BUCKET_NAME);
 if (!bucketExists) {
   await supabase.storage.createBucket(BUCKET_NAME, { public: false });
 }
+
+// ===== KV helpers (performance) =====
+const KV_TABLE = "kv_store_7946999d";
+const KV_PREFIX_PAGE_SIZE = 1000;
+const KV_PREFIX_END_CHAR = "\uffff";
+
+function kvPrefixEnd(prefix: string) {
+  return `${prefix}${KV_PREFIX_END_CHAR}`;
+}
+
+async function kvListKeysByPrefix(prefix: string): Promise<string[]> {
+  const out: string[] = [];
+  const end = kvPrefixEnd(prefix);
+  for (let offset = 0; ; offset += KV_PREFIX_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(KV_TABLE)
+      .select("key")
+      .gte("key", prefix)
+      .lt("key", end)
+      .range(offset, offset + KV_PREFIX_PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const keys = (data ?? []).map((row: any) => String(row.key));
+    out.push(...keys);
+    if (keys.length < KV_PREFIX_PAGE_SIZE) break;
+  }
+  return out;
+}
+
+async function kvGetManyOrdered(keys: string[], chunkSize = 200): Promise<any[]> {
+  const byKey = new Map<string, any>();
+  for (let i = 0; i < keys.length; i += chunkSize) {
+    const chunk = keys.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from(KV_TABLE)
+      .select("key, value")
+      .in("key", chunk);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      byKey.set(String((row as any).key), (row as any).value);
+    }
+  }
+  return keys.map((k) => (byKey.has(k) ? byKey.get(k) : null));
+}
+
+function extractIdFromIndexKey(indexKey: string) {
+  const parts = indexKey.split(":");
+  return parts.length ? parts[parts.length - 1] : "";
+}
+
 
 // Logo remoto (superseller) usado no PDF
 const LOGO_URL =
@@ -115,6 +167,105 @@ function asStringArray(val: any): string[] {
   if (Array.isArray(val)) return val.map((v) => String(v)).filter(Boolean);
   if (typeof val === "string") return val.split(",").map((v) => v.trim()).filter(Boolean);
   return [];
+}
+
+function isAiAnalysisComplete(ai: any) {
+  if (!ai) return false;
+  if (typeof ai.generatedAt !== "string" || !ai.generatedAt) return false;
+  if (!ai.pillarScores || typeof ai.pillarScores !== "object") return false;
+  if (!ai.goldScores || typeof ai.goldScores !== "object") return false;
+  return true;
+}
+
+function extractAnswersFromEvaluation(evaluation: any) {
+  const surveyAnswers = evaluation?.surveyData?.answers;
+  if (Array.isArray(surveyAnswers) && surveyAnswers.length > 0) return surveyAnswers;
+  const formResponses = evaluation?.formResponses;
+  if (Array.isArray(formResponses) && formResponses.length > 0) return formResponses;
+  return [];
+}
+
+async function resolveSurveyIdForEvaluation(evaluation: any) {
+  const direct = (evaluation?.surveyId || "").toString().trim();
+  if (direct) return direct;
+  const responseId = (evaluation?.surveyResponseId || "").toString().trim();
+  try {
+    if (responseId) {
+      const { data } = await supabase
+        .from("survey_responses")
+        .select("survey_id")
+        .eq("id", responseId)
+        .maybeSingle();
+      const sid = (data as any)?.survey_id;
+      if (sid) return sid.toString();
+    }
+  } catch (_) {
+    // ignore
+  }
+  try {
+    const { data } = await supabase
+      .from("survey_responses")
+      .select("survey_id")
+      .eq("evaluation_id", evaluation?.id || "")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const sid = (data as any)?.survey_id;
+    if (sid) return sid.toString();
+  } catch (_) {
+    // ignore
+  }
+  return null;
+}
+
+function sanitizeInstagramHandle(raw: string | undefined) {
+  if (!raw) return "";
+  return raw
+    .trim()
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//i, "")
+    .replace(/^@/, "")
+    .split(/[/?#]/)[0]
+    .replace(/[^a-zA-Z0-9._]/g, "");
+}
+
+async function fetchInstagramAvatar(handle: string) {
+  const target = `https://www.instagram.com/${handle}/`;
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+  try {
+    const res = await fetch(target, { headers });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const html = await res.text();
+    const jsonMatch =
+      html.match(/"profile_pic_url_hd":"([^"]+)"/) ||
+      html.match(/"profile_pic_url":"([^"]+)"/);
+    if (jsonMatch) {
+      const url = jsonMatch[1].replace(/\\u0026/g, "&");
+      return url;
+    }
+    const ogMatch = html.match(/property="og:image" content="([^"]+)"/i);
+    if (ogMatch) {
+      return ogMatch[1].replace(/\\u0026/g, "&");
+    }
+  } catch (_err) {
+    // try fallback below
+  }
+
+  // fallback: try unavatar (can rate-limit; best-effort)
+  try {
+    const avatarUrl = `https://unavatar.io/instagram/${encodeURIComponent(handle)}`;
+    const headRes = await fetch(avatarUrl, { method: "HEAD" });
+    if (headRes.ok && (headRes.headers.get("content-type") || "").startsWith("image/")) {
+      return avatarUrl;
+    }
+  } catch (_err) {
+    // ignore
+  }
+
+  return null;
 }
 
 async function requireAuthWithUserData(request: Request) {
@@ -1327,13 +1478,46 @@ app.put("/make-server-7946999d/auth/me", async (c) => {
     if (!existing) {
       return c.json({ error: "User not found" }, 404);
     }
-    const allowed = (({ name, phone }) => ({ name, phone }))(updates || {});
+    const allowed = (({ name, phone, avatarUrl, avatarPath }) => ({ name, phone, avatarUrl, avatarPath }))(updates || {});
     const updated = { ...existing, ...allowed, updatedAt: new Date().toISOString() };
     await kv.set(`users:${user.email}`, updated);
     return c.json({ success: true, user: updated });
   } catch (err) {
     console.log(`Error updating user: ${err}`);
     return c.json({ error: "Erro ao atualizar perfil" }, 500);
+  }
+});
+
+// Change current user's password
+app.post("/make-server-7946999d/auth/change-password", async (c) => {
+  const { error, user } = await verifyAuth(c.req.raw);
+  if (error || !user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  try {
+    const body = await c.req.json();
+    const newPassword = (body?.newPassword || "").toString();
+
+    if (!newPassword || newPassword.length < 8) {
+      return c.json({ error: "A nova senha deve ter pelo menos 8 caracteres." }, 400);
+    }
+
+    if (!supabaseServiceKey) {
+      return c.json({ error: "Chave de serviço não configurada no backend." }, 500);
+    }
+
+    const updated = await supabase.auth.admin.updateUserById(user.id, { password: newPassword });
+    if (updated.error) {
+      console.log(`Erro ao atualizar senha: ${updated.error.message}`);
+      return c.json({ error: updated.error.message || "Não foi possível atualizar a senha." }, 400);
+    }
+
+    return c.json({ success: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`Erro ao trocar senha: ${message}`);
+    return c.json({ error: `Erro ao trocar senha: ${message}` }, 500);
   }
 });
 
@@ -1569,6 +1753,8 @@ app.post("/make-server-7946999d/partners", async (c) => {
       cpf: partnerData.cpf,
       partnerId: id,
       companyId: companyId || null,
+      avatarUrl: partnerData.avatarUrl || "",
+      avatarPath: partnerData.avatarPath || "",
       createdAt: new Date().toISOString(),
     });
 
@@ -1710,6 +1896,8 @@ app.put("/make-server-7946999d/partners/:id", async (c) => {
         cpf: partner.cpf,
         partnerId: id,
         companyId: partner.companyId || null,
+        avatarUrl: partner.avatarUrl || existingUser?.avatarUrl || "",
+        avatarPath: partner.avatarPath || existingUser?.avatarPath || "",
         updatedAt: new Date().toISOString(),
       });
     }
@@ -1786,6 +1974,8 @@ app.post("/make-server-7946999d/evaluators", async (c) => {
           name: evaluatorData.name,
           role: "evaluator",
           evaluatorId: id,
+          avatarUrl: evaluatorData.avatarUrl || "",
+          avatarPath: evaluatorData.avatarPath || "",
           createdAt: new Date().toISOString(),
         });
       }
@@ -1826,7 +2016,58 @@ app.get("/make-server-7946999d/evaluators", async (c) => {
       )
       .map((item) => item.value);
 
-    return c.json({ evaluators: filteredEvaluators });
+    // Load evaluations to compute per-evaluator stats (count + average score)
+    const evaluations = (await kv.getByPrefix("evaluations:"))
+      .filter(
+        (item) =>
+          item.key.startsWith("evaluations:") &&
+          !item.key.includes(":index:"),
+      )
+      .map((item) => item.value);
+
+    const completedEvaluations = evaluations.filter(
+      (ev: any) => ev?.status === "completed",
+    );
+
+    const stats = new Map<
+      string,
+      { count: number; scoreSum: number; scoreCount: number }
+    >();
+
+    completedEvaluations.forEach((ev: any) => {
+      const evaluatorId = ev?.evaluatorId;
+      if (!evaluatorId) return;
+      const current = stats.get(evaluatorId) || {
+        count: 0,
+        scoreSum: 0,
+        scoreCount: 0,
+      };
+      current.count += 1; // only completed evaluations
+
+      const managerScore =
+        typeof ev?.managerRating === "number" ? ev.managerRating : null;
+      if (typeof managerScore === "number") {
+        const clamped = Math.max(0, Math.min(5, managerScore));
+        current.scoreSum += clamped;
+        current.scoreCount += 1;
+      }
+      stats.set(evaluatorId, current);
+    });
+
+    const withStats = filteredEvaluators.map((ev: any) => {
+      const stat = stats.get(ev.id) || { count: 0, scoreSum: 0, scoreCount: 0 };
+      const avgScore =
+        stat.scoreCount > 0
+          ? Math.round((stat.scoreSum / stat.scoreCount) * 10) / 10
+          : 0;
+      return {
+        ...ev,
+        totalEvaluations: stat.count ?? ev.totalEvaluations ?? 0,
+        score: avgScore,
+      };
+    });
+
+    return c.json({ evaluators: withStats });
   } catch (error) {
     console.log(`Error fetching evaluators: ${error}`);
     return c.json({ error: "Error fetching evaluators" }, 500);
@@ -1878,6 +2119,21 @@ app.put("/make-server-7946999d/evaluators/:id", async (c) => {
 
     await kv.set(`evaluators:${id}`, evaluator);
     await kv.set(`evaluators:index:${id}`, { id, name: evaluator.name });
+
+    if (evaluator.email) {
+      const existingUser = await kv.get(`users:${evaluator.email}`);
+      await kv.set(`users:${evaluator.email}`, {
+        ...(existingUser || {}),
+        id: existingUser?.id || evaluator.userId,
+        email: evaluator.email,
+        name: evaluator.name,
+        role: "evaluator",
+        evaluatorId: id,
+        avatarUrl: evaluator.avatarUrl || existingUser?.avatarUrl || "",
+        avatarPath: evaluator.avatarPath || existingUser?.avatarPath || "",
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
     return c.json({ success: true, evaluator });
   } catch (error) {
@@ -1976,41 +2232,32 @@ app.get("/make-server-7946999d/evaluations", async (c) => {
       if (companyId && companyId !== scopedCompanyId) {
         return c.json({ error: "Forbidden" }, 403);
       }
-      const keys = await kv.getByPrefix(
-        `evaluations:by_company:${scopedCompanyId}:`,
-      );
-      const ids = keys.map((k) => k.value.id);
-      evaluations = await Promise.all(
-        ids.map((id) => kv.get(`evaluations:${id}`)),
-      );
+      const indexPrefix = `evaluations:by_company:${scopedCompanyId}:`;
+      const indexKeys = await kvListKeysByPrefix(indexPrefix);
+      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
+      const evaluationKeys = ids.map((id) => `evaluations:${id}`);
+      evaluations = await kvGetManyOrdered(evaluationKeys);
       if (evaluatorId) {
         evaluations = evaluations.filter((e) => e?.evaluatorId === evaluatorId);
       }
     } else if (evaluatorId) {
-      const keys = await kv.getByPrefix(
-        `evaluations:by_evaluator:${evaluatorId}:`,
-      );
-      const ids = keys.map((k) => k.value.id);
-      evaluations = await Promise.all(
-        ids.map((id) => kv.get(`evaluations:${id}`)),
-      );
+      const indexPrefix = `evaluations:by_evaluator:${evaluatorId}:`;
+      const indexKeys = await kvListKeysByPrefix(indexPrefix);
+      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
+      const evaluationKeys = ids.map((id) => `evaluations:${id}`);
+      evaluations = await kvGetManyOrdered(evaluationKeys);
     } else if (companyId) {
-      const keys = await kv.getByPrefix(
-        `evaluations:by_company:${companyId}:`,
-      );
-      const ids = keys.map((k) => k.value.id);
-      evaluations = await Promise.all(
-        ids.map((id) => kv.get(`evaluations:${id}`)),
-      );
+      const indexPrefix = `evaluations:by_company:${companyId}:`;
+      const indexKeys = await kvListKeysByPrefix(indexPrefix);
+      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
+      const evaluationKeys = ids.map((id) => `evaluations:${id}`);
+      evaluations = await kvGetManyOrdered(evaluationKeys);
     } else {
-      const allEvals = await kv.getByPrefix("evaluations:");
-      evaluations = allEvals
-        .filter(
-          (item) =>
-            item.key.startsWith("evaluations:") &&
-            !item.key.includes(":by_"),
-        )
-        .map((item) => item.value);
+      const allKeys = await kvListKeysByPrefix("evaluations:");
+      const evaluationKeys = allKeys.filter((k) =>
+        k.startsWith("evaluations:") && !k.startsWith("evaluations:by_")
+      );
+      evaluations = await kvGetManyOrdered(evaluationKeys);
     }
 
     let filtered = evaluations.filter((e) => e !== null);
@@ -2164,12 +2411,21 @@ app.get("/make-server-7946999d/dashboard/summary", async (c) => {
   };
 
   try {
-    // Carrega avaliações do KV (apenas as principais)
-    const all = await kv.getByPrefix("evaluations:");
-    let evaluations = all
-      .filter((item) => item.key.startsWith("evaluations:") && !item.key.includes(":by_"))
-      .map((item) => item.value)
-      .filter(Boolean);
+    // Carrega avaliações (evita varredura + N+1 quando há filtro por empresa)
+    let evaluations: any[] = [];
+    if (companyId) {
+      const indexPrefix = `evaluations:by_company:${companyId}:`;
+      const indexKeys = await kvListKeysByPrefix(indexPrefix);
+      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
+      const evalKeys = ids.map((id) => `evaluations:${id}`);
+      evaluations = (await kvGetManyOrdered(evalKeys)).filter(Boolean);
+    } else {
+      const allKeys = await kvListKeysByPrefix("evaluations:");
+      const evalKeys = allKeys.filter((k) =>
+        k.startsWith("evaluations:") && !k.startsWith("evaluations:by_")
+      );
+      evaluations = (await kvGetManyOrdered(evalKeys)).filter(Boolean);
+    }
 
     // Filtro por empresa
     if (companyId) {
@@ -2602,16 +2858,20 @@ app.post("/make-server-7946999d/evaluations/:id/reanalyze", async (c) => {
       if (!companyId) return c.json({ error: "Usuário sem empresa vinculada" }, 403);
       if (evaluation.companyId !== companyId) return c.json({ error: "Forbidden" }, 403);
     }
-    if (!evaluation.surveyData?.answers || !evaluation.surveyId) {
+    if (!evaluation.surveyData?.answers) {
       return c.json({ error: "Evaluation missing survey data" }, 400);
+    }
+    const resolvedSurveyId = await resolveSurveyIdForEvaluation(evaluation);
+    if (!resolvedSurveyId) {
+      return c.json({ error: "Evaluation missing surveyId" }, 400);
     }
     await analyzeEvaluationAI({
       evaluationId: id,
       companyId: evaluation.companyId,
-      surveyId: evaluation.surveyId,
+      surveyId: resolvedSurveyId,
       answers: evaluation.surveyData.answers,
       visitData: evaluation.visitData,
-      sectionsScore: evaluation.surveyData.sectionsScore,
+      sectionsScore: evaluation.surveyData.sectionsScore || evaluation.surveyData.sectionResults,
     });
     return c.json({ success: true });
   } catch (err) {
@@ -2633,6 +2893,8 @@ app.put("/make-server-7946999d/evaluations/:id", async (c) => {
     if (!existing) {
       return c.json({ error: "Evaluation not found" }, 404);
     }
+
+    const previousStatus = (existing as any)?.status;
 
     // Bloqueia alteração do vendedor avaliado (admin apenas, em avaliações concluídas)
     const requestedVisitData = updates?.visitData;
@@ -2660,6 +2922,58 @@ app.put("/make-server-7946999d/evaluations/:id", async (c) => {
     };
 
     await kv.set(`evaluations:${id}`, evaluation);
+
+    // Dispara IA automaticamente quando a avaliação for concluída
+    const becameCompleted =
+      previousStatus !== "completed" && (evaluation as any)?.status === "completed";
+    const shouldAutoAnalyze =
+      becameCompleted && !isAiAnalysisComplete((evaluation as any)?.aiAnalysis);
+
+    if (shouldAutoAnalyze) {
+      const runAi = async () => {
+        try {
+          const latest = await kv.get(`evaluations:${id}`);
+          if (!latest) return;
+          if ((latest as any)?.status !== "completed") return;
+          if (isAiAnalysisComplete((latest as any)?.aiAnalysis)) return;
+
+          const answers = extractAnswersFromEvaluation(latest);
+          if (!answers.length) {
+            console.log(`IA: avaliação ${id} sem respostas; pulando`);
+            return;
+          }
+
+          const surveyId = await resolveSurveyIdForEvaluation(latest);
+          if (!surveyId) {
+            console.log(`IA: não foi possível determinar surveyId para avaliação ${id}`);
+            return;
+          }
+
+          const visitData = (latest as any)?.visitData || (latest as any)?.surveyData?.visitData;
+          const sectionsScore =
+            (latest as any)?.surveyData?.sectionsScore ||
+            (latest as any)?.surveyData?.sectionResults ||
+            (latest as any)?.surveyData?.sections_score;
+
+          await analyzeEvaluationAI({
+            evaluationId: id,
+            companyId: (latest as any)?.companyId,
+            surveyId,
+            answers,
+            visitData,
+            sectionsScore,
+          });
+        } catch (err) {
+          console.log(`IA: erro no auto-processamento da avaliação ${id}: ${err}`);
+        }
+      };
+
+      try {
+        (c as any).executionCtx?.waitUntil?.(runAi());
+      } catch (_) {
+        runAi();
+      }
+    }
 
     return c.json({ success: true, evaluation });
   } catch (error) {
@@ -2899,11 +3213,12 @@ app.post("/make-server-7946999d/upload", async (c) => {
     const fileName = `${folder}/${crypto.randomUUID()}-${file.name}`;
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
+    const contentType = file.type || "application/octet-stream";
 
     const { data, error: uploadError } = await supabase.storage
       .from(BUCKET_NAME)
       .upload(fileName, buffer, {
-        contentType: file.type,
+        contentType,
       });
 
     if (uploadError) {
@@ -2927,6 +3242,34 @@ app.post("/make-server-7946999d/upload", async (c) => {
   }
 });
 
+// Novo: assina URL lendo o path via query param (suporta "/" no path)
+app.get("/make-server-7946999d/file", async (c) => {
+  const { error, user } = await verifyAuth(c.req.raw);
+  if (error || !user) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  try {
+    const path = c.req.query("path");
+    if (!path) return c.json({ error: "Path required" }, 400);
+
+    const { data: urlData, error: urlError } = await supabase.storage
+      .from(BUCKET_NAME)
+      .createSignedUrl(path, 3600); // 1 hour
+
+    if (urlError) {
+      console.log(`Error creating signed URL: ${urlError.message}`);
+      return c.json({ error: urlError.message }, 500);
+    }
+
+    return c.json({ url: urlData.signedUrl });
+  } catch (error) {
+    console.log(`Error getting file URL: ${error}`);
+    return c.json({ error: "Error getting file URL" }, 500);
+  }
+});
+
+// Legacy (mantido, mas não suporta "/")
 app.get("/make-server-7946999d/file/:path", async (c) => {
   const { error, user } = await verifyAuth(c.req.raw);
   if (error || !user) {
@@ -3058,12 +3401,10 @@ app.get(
       }
 
       // Get all evaluations for this company
-      const evaluationRefs = await kv.getByPrefix(
-        `evaluations:by_company:${companyId}:`,
-      );
-      const evaluations = await Promise.all(
-        evaluationRefs.map((ref) => kv.get(`evaluations:${ref.value.id}`)),
-      );
+      const indexPrefix = `evaluations:by_company:${companyId}:`;
+      const indexKeys = await kvListKeysByPrefix(indexPrefix);
+      const ids = indexKeys.map(extractIdFromIndexKey).filter(Boolean);
+      const evaluations = await kvGetManyOrdered(ids.map((id) => `evaluations:${id}`));
 
       const completedEvaluations = evaluations.filter(
         (e) => e && e.status === "completed",
@@ -3120,17 +3461,16 @@ app.post(
         if (evaluation.companyId !== companyId) return c.json({ error: "Forbidden" }, 403);
       }
 
-      // Simple analysis based on form responses
-      // In a real implementation, this would use an AI API
+      // Simple analysis (fallback) baseado nas respostas do formulário
       const analysis = {
-        overallScore: evaluation.formResponses
-          ? Object.values(evaluation.formResponses).reduce(
+        overallScore: (evaluation.surveyData?.answers || evaluation.formResponses)
+          ? Object.values(evaluation.surveyData?.answers || evaluation.formResponses).reduce(
             (sum: number, val: any) => {
               if (typeof val === "number") return sum + val;
               return sum;
             },
             0,
-          ) / Object.keys(evaluation.formResponses).length
+          ) / Object.keys(evaluation.surveyData?.answers || evaluation.formResponses).length
           : 0,
         strengths: ["Atendimento cordial", "Ambiente limpo"],
         improvements: ["Tempo de espera", "Conhecimento do produto"],
@@ -3154,6 +3494,108 @@ app.post(
     }
   },
 );
+
+// Cron/backfill: process completed evaluations missing AI analysis.
+// Auth: either admin user token OR header `x-ai-cron-secret` matching env `AI_CRON_SECRET`.
+app.post("/make-server-7946999d/ai/process-pending", async (c) => {
+  const cronSecret = (Deno.env.get("AI_CRON_SECRET") || "").toString();
+  const providedSecret = (c.req.header("x-ai-cron-secret") || "").toString();
+  const isCron = cronSecret && providedSecret && providedSecret === cronSecret;
+
+  if (!isCron) {
+    const auth = await requireAuthWithUserData(c.req.raw);
+    if (auth.error || !auth.user) return c.json({ error: "Unauthorized" }, 401);
+    if (normalizeRole(auth.role) !== "admin") return c.json({ error: "Forbidden" }, 403);
+  }
+
+  const rawLimit = parseInt(c.req.query("limit") || "5", 10);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 20) : 5;
+  const dryRun = (c.req.query("dry") || "") === "1";
+  const force = (c.req.query("force") || "") === "1";
+
+  try {
+    const items = await kv.getByPrefix("evaluations:");
+    const evaluations = items
+      .filter(({ key }) => {
+        if (!key.startsWith("evaluations:")) return false;
+        const rest = key.slice("evaluations:".length);
+        return rest.length > 0 && !rest.includes(":");
+      })
+      .map(({ value }) => value)
+      .filter((ev) => ev && ev.status === "completed");
+
+    const needsAi = (ev: any) => force || !isAiAnalysisComplete(ev?.aiAnalysis);
+
+    const pending = evaluations
+      .filter(needsAi)
+      .sort((a: any, b: any) => {
+        const ta = Date.parse(a.completedAt || a.updatedAt || a.createdAt || "") || 0;
+        const tb = Date.parse(b.completedAt || b.updatedAt || b.createdAt || "") || 0;
+        return ta - tb;
+      });
+
+    const batch = pending.slice(0, limit);
+    if (dryRun) {
+      return c.json({
+        success: true,
+        mode: "dry",
+        totalCompleted: evaluations.length,
+        pending: pending.length,
+        batch: batch.map((e: any) => ({ id: e.id, companyId: e.companyId })),
+      });
+    }
+
+    const processed: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    const errors: { id: string; error: string }[] = [];
+
+    for (const ev of batch) {
+      const id = (ev?.id || "").toString();
+      try {
+        const answers = extractAnswersFromEvaluation(ev);
+        if (!answers.length) {
+          skipped.push({ id, reason: "no_answers" });
+          continue;
+        }
+        const surveyId = await resolveSurveyIdForEvaluation(ev);
+        if (!surveyId) {
+          skipped.push({ id, reason: "missing_survey_id" });
+          continue;
+        }
+        const visitData = ev?.visitData || ev?.surveyData?.visitData;
+        const sectionsScore =
+          ev?.surveyData?.sectionsScore ||
+          ev?.surveyData?.sectionResults ||
+          ev?.surveyData?.sections_score;
+
+        await analyzeEvaluationAI({
+          evaluationId: id,
+          companyId: ev?.companyId,
+          surveyId,
+          answers,
+          visitData,
+          sectionsScore,
+        });
+        processed.push(id);
+      } catch (err) {
+        errors.push({ id, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    return c.json({
+      success: true,
+      totalCompleted: evaluations.length,
+      pending: pending.length,
+      attempted: batch.length,
+      processed,
+      skipped,
+      errors,
+    });
+  } catch (err) {
+    console.log(`Error processing pending AI: ${err}`);
+    return c.json({ error: "Error processing pending AI" }, 500);
+  }
+});
 
 // ===== SURVEY BUILDER (CUSTOM FORMS) =====
 
@@ -3617,6 +4059,7 @@ app.post("/make-server-7946999d/surveys/:id/responses", async (c) => {
             answers,
             sectionsScore: sectionResults,
           },
+          formResponses: answers,
           visitData,
           attachments: {
             receipt,
@@ -3655,6 +4098,15 @@ app.get("/make-server-7946999d/health", (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// Instagram avatar proxy (best-effort, no auth required)
+app.get("/make-server-7946999d/instagram-avatar", async (c) => {
+  const handle = sanitizeInstagramHandle(c.req.query("handle"));
+  if (!handle) return c.json({ error: "handle obrigatório" }, 400);
+  const url = await fetchInstagramAvatar(handle);
+  if (!url) return c.json({ error: "Não foi possível obter a foto do Instagram" }, 404);
+  return c.redirect(url, 302);
+});
+
 // ===== IA Helpers =====
 async function analyzeEvaluationAI(payload: {
   evaluationId: string;
@@ -3665,10 +4117,7 @@ async function analyzeEvaluationAI(payload: {
   sectionsScore?: any[];
 }) {
   const apiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!apiKey) {
-    console.log("OPENAI_API_KEY não configurada; pulando análise IA.");
-    return;
-  }
+  const hasApiKey = !!apiKey;
 
   try {
     console.log(`IA: iniciando análise para evaluation ${payload.evaluationId}`);
@@ -3827,33 +4276,49 @@ Dados para análise:
 ${answersText}
     `;
 
-    const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        temperature,
-        messages: [
-          { role: "system", content: "Você gera análises curtas e objetivas e DEVE responder apenas em JSON." },
-          { role: "user", content: prompt },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!aiRes.ok) {
-      console.log(`AI call failed: ${aiRes.status} ${await aiRes.text()}`);
-      return;
-    }
-    const aiJson = await aiRes.json();
     let parsed: any = {};
-    try {
-      parsed = JSON.parse(aiJson.choices[0].message.content);
-    } catch (_) {
-      parsed = { summary: aiJson.choices[0].message.content };
+    if (hasApiKey) {
+      const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature,
+          messages: [
+            { role: "system", content: "Você gera análises curtas e objetivas e DEVE responder apenas em JSON." },
+            { role: "user", content: prompt },
+          ],
+          response_format: { type: "json_object" },
+        }),
+      });
+
+      if (!aiRes.ok) {
+        console.log(`AI call failed: ${aiRes.status} ${await aiRes.text()}`);
+      } else {
+        const aiJson = await aiRes.json();
+        try {
+          parsed = JSON.parse(aiJson.choices[0].message.content);
+        } catch (_) {
+          parsed = { summary: aiJson.choices[0].message.content };
+        }
+      }
+    }
+
+    if (!hasApiKey || Object.keys(parsed || {}).length === 0) {
+      parsed = {
+        summary: "Análise gerada automaticamente.",
+        strengths: [],
+        improvements: [],
+        recommendationsSeller: [],
+        recommendationsManager: [],
+        actionPlan: { "7dias": [], "30dias": [], "90dias": [] },
+        satisfactions: [],
+        frustrations: [],
+        strategicInsights: [],
+      };
     }
 
     // Se o modelo não devolver nota, calcula uma média simples das seções ou respostas numéricas

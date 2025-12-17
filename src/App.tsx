@@ -14,6 +14,7 @@ import { AnalyticsPage } from './components/AnalyticsPage';
 import { VoucherValidationPage } from './components/VoucherValidationPage';
 import { QuestEditorPage } from './components/QuestEditorPage';
 import { ProfilePage } from './components/ProfilePage';
+import { SettingsPage } from './components/SettingsPage';
 
 const supabase = createClient(
   `https://${projectId}.supabase.co`,
@@ -32,6 +33,7 @@ type Page =
   | 'profile'
   | 'evaluation-detail'
   | 'voucher-validation'
+  | 'settings'
   | 'quest-editor'
   | 'analytics';
 
@@ -163,8 +165,8 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
   }
@@ -174,7 +176,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background text-foreground">
       {currentPage === 'profile' && (
         <ProfilePage
           user={user}
@@ -258,6 +260,15 @@ export default function App() {
       
       {currentPage === 'voucher-validation' && (
         <VoucherValidationPage
+          user={user}
+          accessToken={accessToken}
+          onNavigate={navigateTo}
+          onLogout={handleLogout}
+        />
+      )}
+
+      {currentPage === 'settings' && (
+        <SettingsPage
           user={user}
           accessToken={accessToken}
           onNavigate={navigateTo}

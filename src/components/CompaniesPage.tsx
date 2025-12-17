@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Layout } from './Layout';
-import { Plus, Edit, Trash2, Upload, Search, Building2 } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Building2, LayoutGrid, List, X } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
+import { LoadingDots } from './LoadingDots';
+import { useTheme } from '../utils/theme';
 
 interface Company {
   id: string;
@@ -33,7 +35,11 @@ interface CompaniesPageProps {
   onLogout: () => void;
 }
 
+const getDefaultViewMode = () => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'list' : 'card');
+
 export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: CompaniesPageProps) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
   const [companies, setCompanies] = useState<Company[]>([]);
   const [partners, setPartners] = useState<any[]>([]);
   const [surveys, setSurveys] = useState<any[]>([]);
@@ -43,6 +49,10 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
   const [searchTerm, setSearchTerm] = useState('');
   const [uploading, setUploading] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => getDefaultViewMode());
+  const [cardPage, setCardPage] = useState(1);
+  const [logoErrorMap, setLogoErrorMap] = useState<Record<string, boolean>>({});
 
   const [formData, setFormData] = useState<Partial<Company>>({
     name: '',
@@ -69,6 +79,10 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
       loadSurveys();
     }
   }, []);
+
+  useEffect(() => {
+    setCardPage(1);
+  }, [searchTerm, viewMode]);
 
   const surveyNameById = surveys.reduce<Record<string, string>>((acc, s) => {
     acc[s.id] = s.title;
@@ -136,7 +150,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setSaving(true);
     try {
       const url = editingCompany
         ? `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/companies/${editingCompany.id}`
@@ -161,6 +175,8 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     } catch (error) {
       console.error('Error saving company:', error);
       alert('Erro ao salvar empresa');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -353,6 +369,18 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     setShowModal(false);
     setEditingCompany(null);
     setFormData({});
+    setSaving(false);
+  };
+
+  const getInstagramAvatar = (instagram?: string) => {
+    if (!instagram) return '';
+    const handle = instagram
+      .trim()
+      .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+      .replace(/^@/, '')
+      .split(/[/?#]/)[0];
+    if (!handle) return '';
+    return `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/instagram-avatar?handle=${encodeURIComponent(handle)}`;
   };
 
   const filteredCompanies = companies.filter(company =>
@@ -360,16 +388,25 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
     company.cnpj.includes(searchTerm)
   );
 
+  const companiesPerPage = 15;
+  const totalCompanyPages = Math.max(1, Math.ceil(filteredCompanies.length / companiesPerPage));
+  const currentCompanyPage = Math.min(cardPage, totalCompanyPages);
+  const paginatedCompanies = viewMode === 'card'
+    ? filteredCompanies.slice((currentCompanyPage - 1) * companiesPerPage, currentCompanyPage * companiesPerPage)
+    : filteredCompanies;
+  const cardStart = (currentCompanyPage - 1) * companiesPerPage + 1;
+  const cardEnd = Math.min(currentCompanyPage * companiesPerPage, filteredCompanies.length);
+
   const managers = partners.filter(p => p.role === 'gerente' || p.role === 'manager');
   const sellers = partners.filter(p => p.role === 'vendedor' || p.role === 'seller');
 
   return (
     <Layout user={user} currentPage="companies" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="max-w-7xl mx-auto">
+      <div className={`max-w-7xl mx-auto ${isDark ? 'evaluation-dark' : ''}`}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6 sm:mb-8">
           <div>
-            <h2 className="text-gray-900 mb-2">Empresas</h2>
-            <p className="text-gray-600">Gerencie as empresas cadastradas</p>
+            <h2 className="text-foreground mb-2">Empresas</h2>
+            <p className="text-muted-foreground">Gerencie as empresas cadastradas</p>
           </div>
           <button
             onClick={() => openModal()}
@@ -380,29 +417,57 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
           </button>
         </div>
 
-        {/* Search */}
-        <div className="mb-4 sm:mb-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+        {/* Search + View toggle */}
+        <div className="mb-4 sm:mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-xl">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <input
               type="text"
               placeholder="Buscar por nome ou CNPJ..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-3 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
             />
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setViewMode('card')}
+              className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                viewMode === 'card'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-card text-foreground border-border hover:bg-muted'
+              }`}
+              aria-pressed={viewMode === 'card'}
+            >
+              <LayoutGrid className="w-4 h-4" />
+              Cards
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                viewMode === 'list'
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-card text-foreground border-border hover:bg-muted'
+              }`}
+              aria-pressed={viewMode === 'list'}
+            >
+              <List className="w-4 h-4" />
+              Lista
+            </button>
           </div>
         </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
         ) : filteredCompanies.length === 0 ? (
-          <div className="text-center py-10 sm:py-12 bg-white rounded-lg shadow-md">
-            <Building2 className="w-12 h-12 sm:w-16 sm:h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-gray-900 mb-2">Nenhuma empresa cadastrada</h3>
-            <p className="text-gray-600 mb-6">Comece cadastrando sua primeira empresa</p>
+          <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-sm">
+            <Building2 className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Nenhuma empresa cadastrada</h3>
+            <p className="text-muted-foreground mb-6">Comece cadastrando sua primeira empresa</p>
             <button
               onClick={() => openModal()}
               className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center justify-center gap-2 w-full sm:w-auto"
@@ -412,189 +477,314 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
             </button>
           </div>
         ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          {filteredCompanies.map((company) => (
-            <div key={company.id} className="bg-white rounded-lg shadow-md p-4 sm:p-6 hover:shadow-lg transition-shadow">
-              <div className="flex items-start justify-between mb-4">
-                {company.logoUrl ? (
-                  <div className="w-12 h-12 rounded-full overflow-hidden border border-gray-200 bg-gray-50">
-                    <img
-                      src={company.logoUrl}
-                      alt={`Logomarca ${company.name}`}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  </div>
-                ) : (
-                  <div className="bg-blue-100 rounded-lg p-3">
-                    <Building2 className="w-6 h-6 text-blue-600" />
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => openModal(company)}
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
+          <>
+            {viewMode === 'card' ? (
+              <>
+                <div className="flex items-center justify-between mb-4 text-sm text-muted-foreground">
+                  <span>
+                    Exibindo {cardStart}-{cardEnd} de {filteredCompanies.length}
+                  </span>
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => handleDelete(company.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      type="button"
+                      onClick={() => setCardPage((prev) => Math.max(1, prev - 1))}
+                      disabled={currentCompanyPage === 1}
+                      className="px-3 py-1.5 rounded-lg border border-border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted transition-colors"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      Anterior
+                    </button>
+                    <span className="text-foreground">
+                      Página {currentCompanyPage} de {totalCompanyPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCardPage((prev) => Math.min(totalCompanyPages, prev + 1))}
+                      disabled={currentCompanyPage >= totalCompanyPages}
+                      className="px-3 py-1.5 rounded-lg border border-border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted transition-colors"
+                    >
+                      Próxima
                     </button>
                   </div>
                 </div>
-                <h3 className="text-gray-900 mb-2">{company.name}</h3>
-                <div className="space-y-1 text-sm">
-                  <p className="text-gray-600">CNPJ: {company.cnpj}</p>
-                  <p className="text-gray-600">Email: {company.email}</p>
-                  <p className="text-gray-600">Telefone: {company.phone}</p>
-                  {company.voucherValue && (
-                    <p className="text-gray-600">
-                      Voucher: R$ {company.voucherValue.toFixed(2)}
-                    </p>
-                  )}
-                  {company.defaultSurveyId && (
-                    <p className="text-gray-600 text-sm">
-                      Questionário: {surveyNameById[company.defaultSurveyId] || company.defaultSurveyId}
-                    </p>
-                  )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {paginatedCompanies.map((company) => (
+                    <div key={company.id} className="bg-card border border-border rounded-lg shadow-sm p-4 sm:p-6 hover:shadow-md transition-shadow">
+                      <div className="flex items-start justify-between mb-4">
+                        {(() => {
+                          const logoSrc = !logoErrorMap[company.id]
+                            ? company.logoUrl || getInstagramAvatar(company.instagram)
+                            : '';
+                          return logoSrc ? (
+                            <div className="w-12 h-12 rounded-full overflow-hidden border border-border bg-muted">
+                              <img
+                                src={logoSrc}
+                                alt={`Logomarca ${company.name}`}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                onError={() =>
+                                  setLogoErrorMap((prev) => ({ ...prev, [company.id]: true }))
+                                }
+                              />
+                            </div>
+                          ) : (
+                            <div className="bg-blue-50 rounded-lg p-3">
+                              <Building2 className="w-6 h-6 text-blue-600" />
+                            </div>
+                          );
+                        })()}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => openModal(company)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(company.id)}
+                              className="p-2 text-red-600 hover:bg-red-500/10 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <h3 className="text-foreground mb-2">{company.name}</h3>
+                        <div className="space-y-1 text-sm text-muted-foreground">
+                          <p>CNPJ: {company.cnpj}</p>
+                          <p>Email: {company.email}</p>
+                          <p>Telefone: {company.phone}</p>
+                          {company.voucherValue && (
+                            <p>Voucher: R$ {company.voucherValue.toFixed(2)}</p>
+                          )}
+                          {company.defaultSurveyId && (
+                            <p className="text-sm">
+                              Questionário: {surveyNameById[company.defaultSurveyId] || company.defaultSurveyId}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="bg-card border border-border rounded-lg divide-y divide-border">
+                  {filteredCompanies.map((company) => (
+                    <div
+                      key={company.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openModal(company)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          openModal(company);
+                        }
+                      }}
+                      className="w-full text-left px-4 py-3 sm:px-6 sm:py-4 hover:bg-muted/60 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          {(() => {
+                            const logoSrc = !logoErrorMap[company.id]
+                              ? company.logoUrl || getInstagramAvatar(company.instagram)
+                              : '';
+                            return logoSrc ? (
+                              <div className="w-10 h-10 rounded-full overflow-hidden border border-border bg-muted">
+                                <img
+                                  src={logoSrc}
+                                  alt={`Logomarca ${company.name}`}
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                  referrerPolicy="no-referrer"
+                                  onError={() =>
+                                    setLogoErrorMap((prev) => ({ ...prev, [company.id]: true }))
+                                  }
+                                />
+                              </div>
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-blue-50 border border-border flex items-center justify-center">
+                                <Building2 className="w-5 h-5 text-blue-600" />
+                              </div>
+                            );
+                          })()}
+                          <span className="text-foreground font-medium">{company.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openModal(company);
+                            }}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(company.id);
+                            }}
+                            className="p-2 text-red-600 hover:bg-red-500/10 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ))}
-          </div>
+              )}
+          </>
         )}
       </div>
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 sm:px-6 sm:py-4">
-              <h3 className="text-gray-900">
-                {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
-              </h3>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card text-foreground border border-border rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-lg">
+            <div className="sticky top-0 bg-card border-b border-border px-4 py-3 sm:px-6 sm:py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-foreground text-lg font-semibold leading-tight">
+                    {editingCompany ? 'Editar Empresa' : 'Nova Empresa'}
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {editingCompany
+                      ? 'Atualize as informações da empresa.'
+                      : 'Cadastre uma nova empresa e configure os dados principais.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="shrink-0 p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  aria-label="Fechar modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-gray-700 mb-2">Nome</label>
+                  <label className="block text-foreground mb-2">Nome</label>
                   <input
                     type="text"
                     value={formData.name || ''}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-gray-700 mb-2">Razão Social</label>
+                  <label className="block text-foreground mb-2">Razão Social</label>
                   <input
                     type="text"
                     value={formData.legalName || ''}
                     onChange={(e) => setFormData({ ...formData, legalName: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-gray-700 mb-2">CNPJ</label>
+                  <label className="block text-foreground mb-2">CNPJ</label>
                   <input
                     type="text"
                     value={formData.cnpj || ''}
                     onChange={(e) => setFormData({ ...formData, cnpj: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-gray-700 mb-2">Telefone</label>
+                  <label className="block text-foreground mb-2">Telefone</label>
                   <input
                     type="text"
                     value={formData.phone || ''}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-gray-700 mb-2">Email</label>
+                  <label className="block text-foreground mb-2">Email</label>
                   <input
                     type="email"
                     value={formData.email || ''}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-gray-700 mb-2">Valor do Voucher (R$)</label>
+                  <label className="block text-foreground mb-2">Valor do Voucher (R$)</label>
                   <input
                     type="number"
                     step="0.01"
                     value={formData.voucherValue || ''}
                     onChange={(e) => setFormData({ ...formData, voucherValue: parseFloat(e.target.value) })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-gray-700 mb-2">Endereço</label>
+                <label className="block text-foreground mb-2">Endereço</label>
                 <input
                   type="text"
                   value={formData.address || ''}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                 />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-gray-700 mb-2">Instagram</label>
+                  <label className="block text-foreground mb-2">Instagram</label>
                   <input
                     type="text"
                     value={formData.instagram || ''}
                     onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                     placeholder="@empresa"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-gray-700 mb-2">Website</label>
+                  <label className="block text-foreground mb-2">Website</label>
                   <input
                     type="url"
                     value={formData.website || ''}
                     onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                     placeholder="https://..."
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-gray-700 mb-2">Link SurveyMonkey</label>
+                <label className="block text-foreground mb-2">Link SurveyMonkey</label>
                 <input
                   type="url"
                   value={formData.surveyMonkeyLink || ''}
                   onChange={(e) => setFormData({ ...formData, surveyMonkeyLink: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary"
                   placeholder="https://..."
                 />
               </div>
 
               <div>
-                <label className="block text-gray-700 mb-2">Logomarca</label>
+                <label className="block text-foreground mb-2">Logomarca</label>
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-full overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center">
+                  <div className="w-16 h-16 rounded-full overflow-hidden border border-border bg-muted flex items-center justify-center">
                     {formData.logoUrl ? (
                       <img
                         src={String(formData.logoUrl)}
@@ -603,7 +793,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                         loading="lazy"
                       />
                     ) : (
-                      <Building2 className="w-7 h-7 text-gray-400" />
+                      <Building2 className="w-7 h-7 text-muted-foreground" />
                     )}
                   </div>
                   <div className="flex-1">
@@ -615,20 +805,20 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                         className="flex-1"
                       />
                       {logoUploading && (
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                       )}
                       {formData.logoPath && !logoUploading && (
-                        <span className="text-green-600 text-sm">✓ Enviada</span>
+                        <span className="text-green-500 text-sm">✓ Enviada</span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-muted-foreground mt-2">
                       A imagem é recortada em formato circular e redimensionada (512×512), como foto de perfil.
                     </p>
                     {formData.logoPath && (
                       <button
                         type="button"
                         onClick={() => setFormData((prev) => ({ ...prev, logoPath: '', logoUrl: '' }))}
-                        className="mt-2 text-sm text-red-600 hover:underline"
+                        className="mt-2 text-sm text-destructive hover:underline"
                       >
                         Remover logomarca
                       </button>
@@ -639,11 +829,11 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
 
               {user.role === 'admin' && (
                 <div>
-                  <label className="block text-gray-700 mb-2">Questionário padrão</label>
+                  <label className="block text-foreground mb-2">Questionário padrão</label>
                   <select
                     value={formData.defaultSurveyId || ''}
                     onChange={(e) => setFormData({ ...formData, defaultSurveyId: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-2 border border-border rounded-lg bg-input-background text-foreground focus:ring-2 focus:ring-primary"
                   >
                     <option value="">Nenhum</option>
                     {surveys.map((survey) => (
@@ -653,7 +843,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                     ))}
                   </select>
                   {surveys.length === 0 && (
-                    <p className="text-sm text-orange-600 mt-1">
+                    <p className="text-sm text-orange-500 mt-1">
                       Crie um questionário em "Questionários" para selecioná-lo aqui.
                     </p>
                   )}
@@ -661,7 +851,7 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
               )}
 
               <div>
-                <label className="block text-gray-700 mb-2">Padrão de Atendimento (PDF)</label>
+                <label className="block text-foreground mb-2">Padrão de Atendimento (PDF)</label>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                   <input
                     type="file"
@@ -670,28 +860,30 @@ export function CompaniesPage({ user, accessToken, onNavigate, onLogout }: Compa
                     className="flex-1"
                   />
                   {uploading && (
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                   )}
                   {formData.standardPdfPath && (
-                    <span className="text-green-600 text-sm">✓ Arquivo enviado</span>
+                    <span className="text-green-500 text-sm">✓ Arquivo enviado</span>
                   )}
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4 border-t border-gray-200">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 pt-4 border-t border-border">
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="w-full sm:flex-1 px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  className="w-full sm:flex-1 px-6 py-3 border border-border rounded-lg hover:bg-muted transition-colors"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={uploading || logoUploading}
-                  className="w-full sm:flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
+                  disabled={uploading || logoUploading || saving}
+                  className="w-full sm:flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
                 >
-                  {editingCompany ? 'Salvar' : 'Cadastrar'}
+                  {saving ? (
+                    <LoadingDots label={editingCompany ? 'Salvando' : 'Cadastrando'} />
+                  ) : editingCompany ? 'Salvar' : 'Cadastrar'}
                 </button>
               </div>
             </form>

@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { projectId } from '../utils/supabase/info';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
+import { formatFullName } from '../utils/name';
+import { useTheme } from '../utils/theme';
 
 interface EvaluationsPageProps {
   user: any;
@@ -29,14 +31,18 @@ function StatusIconButton(props: { done: boolean; aria: string; tooltip: string;
   const { done, aria, tooltip, Icon } = props;
   const [open, setOpen] = useState(false);
 
+  const baseClasses =
+    'inline-flex items-center justify-center h-9 w-9 rounded-full border transition-colors';
+  const stateClasses = done
+    ? 'bg-green-50 border-green-200 text-green-600 dark:bg-green-500/15 dark:border-green-500/30 dark:text-green-200'
+    : 'bg-muted border-border text-muted-foreground dark:bg-input/40';
+
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <button
           type="button"
-          className={`inline-flex items-center justify-center h-9 w-9 rounded-full border ${
-            done ? 'bg-green-50 border-green-200 text-green-600' : 'bg-gray-100 border-gray-200 text-gray-400'
-          }`}
+          className={`${baseClasses} ${stateClasses}`}
           aria-label={aria}
           data-no-nav
           onClick={() => setOpen((prev) => !prev)}
@@ -52,6 +58,9 @@ function StatusIconButton(props: { done: boolean; aria: string; tooltip: string;
 }
 
 export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: EvaluationsPageProps) {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
+
   const [evaluations, setEvaluations] = useState<any[]>([]);
   const [companies, setCompanies] = useState<any[]>([]);
   const [evaluators, setEvaluators] = useState<any[]>([]);
@@ -130,7 +139,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
   const getEvaluatorName = (evaluatorId: string) => {
     const evaluator = evaluators.find(e => e.id === evaluatorId);
-    return evaluator?.name || 'N/A';
+    return formatFullName(evaluator?.name, (evaluator as any)?.lastName) || 'N/A';
   };
 
   const getSellerLabel = (evaluation: any) => {
@@ -145,12 +154,32 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
   const getStatusBadge = (status: string) => {
     const badges = {
-      scheduled: { label: 'Agendada', color: 'bg-blue-100 text-blue-800' },
-      in_progress: { label: 'Em Andamento', color: 'bg-yellow-100 text-yellow-800' },
-      completed: { label: 'Concluída', color: 'bg-green-100 text-green-800' },
-      cancelled: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
+      scheduled: {
+        label: 'Agendada',
+        color:
+          'bg-blue-50 text-blue-800 border border-blue-200 dark:bg-blue-500/15 dark:text-blue-100 dark:border-blue-500/30',
+      },
+      in_progress: {
+        label: 'Em Andamento',
+        color:
+          'bg-yellow-50 text-yellow-800 border border-yellow-200 dark:bg-amber-500/15 dark:text-amber-100 dark:border-amber-500/30',
+      },
+      completed: {
+        label: 'Concluída',
+        color:
+          'bg-green-50 text-green-800 border border-green-200 dark:bg-green-500/15 dark:text-green-100 dark:border-green-500/30',
+      },
+      cancelled: {
+        label: 'Cancelada',
+        color:
+          'bg-red-50 text-red-800 border border-red-200 dark:bg-red-500/15 dark:text-red-100 dark:border-red-500/30',
+      },
     };
-    const badge = badges[status as keyof typeof badges] || { label: status, color: 'bg-gray-100 text-gray-800' };
+    const badge =
+      badges[status as keyof typeof badges] || {
+        label: status,
+        color: 'bg-muted text-foreground border border-border',
+      };
     return badge;
   };
 
@@ -388,28 +417,28 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
   return (
     <Layout user={user} currentPage="evaluations" onNavigate={onNavigate} onLogout={onLogout}>
-      <div className="max-w-7xl mx-auto">
+      <div className={`max-w-7xl mx-auto ${isDark ? 'evaluation-dark' : ''}`}>
         <div className="mb-6 sm:mb-8">
-          <h2 className="text-gray-900 mb-2">Avaliações</h2>
-          <p className="text-gray-600">Gerencie todas as avaliações agendadas e concluídas</p>
+          <h2 className="text-foreground mb-2">Avaliações</h2>
+          <p className="text-muted-foreground">Gerencie todas as avaliações agendadas e concluídas</p>
           <div className="mt-3 flex items-center gap-3">
             <button
               type="button"
               onClick={() => setFiltersOpen(true)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border bg-white hover:bg-gray-50"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-card text-foreground hover:bg-muted"
               aria-label="Filtros"
               title="Filtros"
             >
               <SlidersHorizontal className="h-5 w-5" />
             </button>
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
               <input
                 type="text"
                 placeholder="Buscar por empresa ou avaliador..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full h-10 pl-10 pr-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full h-10 pl-10 pr-4 rounded-lg border border-border bg-input text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40 focus:border-primary/50"
               />
             </div>
           </div>
@@ -417,20 +446,20 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
         {filtersOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
             onClick={() => setFiltersOpen(false)}
           >
             <div
-              className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+              className="bg-card text-foreground border border-border rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3">
+              <div className="sticky top-0 bg-card border-b border-border px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-gray-900">Filtros de avaliações</h3>
+                  <h3 className="text-foreground">Filtros de avaliações</h3>
                   <button
                     type="button"
                     onClick={() => setFiltersOpen(false)}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="p-2 text-foreground hover:bg-muted rounded-lg"
                     aria-label="Fechar"
                   >
                     <X className="w-5 h-5" />
@@ -438,10 +467,10 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                 </div>
               </div>
 
-              <div className="p-4 space-y-4">
+              <div className="p-4 space-y-4 bg-card text-foreground">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-500">Data inicial</span>
+                    <span className="text-xs text-muted-foreground">Data inicial</span>
                     <input
                       type="date"
                       value={fromDate}
@@ -449,11 +478,11 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                         setFromDate(e.target.value);
                         setPeriodPreset('custom');
                       }}
-                      className="border rounded px-3 py-2"
+                      className="border border-border bg-input text-foreground rounded px-3 py-2"
                     />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-500">Data final</span>
+                    <span className="text-xs text-muted-foreground">Data final</span>
                     <input
                       type="date"
                       value={toDate}
@@ -461,7 +490,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                         setToDate(e.target.value);
                         setPeriodPreset('custom');
                       }}
-                      className="border rounded px-3 py-2"
+                      className="border border-border bg-input text-foreground rounded px-3 py-2"
                     />
                   </div>
                 </div>
@@ -471,7 +500,9 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                     type="button"
                     onClick={applyLastWeek}
                     className={`px-3 py-2 rounded text-sm border ${
-                      periodPreset === 'last1w' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white'
+                      periodPreset === 'last1w'
+                        ? 'bg-primary/10 border-primary/40 text-primary'
+                        : 'bg-card border-border text-foreground'
                     }`}
                   >
                     Última semana
@@ -480,35 +511,51 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                     type="button"
                     onClick={applyLast4Weeks}
                     className={`px-3 py-2 rounded text-sm border ${
-                      periodPreset === 'last4w' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white'
+                      periodPreset === 'last4w'
+                        ? 'bg-primary/10 border-primary/40 text-primary'
+                        : 'bg-card border-border text-foreground'
                     }`}
                   >
                     Últimas 4 semanas
                   </button>
-                  <button type="button" onClick={clearPeriod} className="px-3 py-2 rounded text-sm border bg-white">
+                  <button
+                    type="button"
+                    onClick={clearPeriod}
+                    className="px-3 py-2 rounded text-sm border border-border bg-muted text-foreground"
+                  >
                     Todo o período
                   </button>
                 </div>
 
                 {!isPartnerPortalRole && (
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-500">Status</span>
+                    <span className="text-xs text-muted-foreground">Status</span>
                     <div className="flex flex-wrap gap-4">
+                      {/*
+                        Usamos cores fixas para os ícones quando ativos para garantir contraste no modo escuro.
+                      */}
                       <div className="flex flex-col items-center gap-1">
                         <button
                           type="button"
                           aria-label="Agendadas"
                           aria-pressed={selectedStatuses.includes('scheduled')}
                           onClick={() => toggleStatus('scheduled')}
-                          className={`inline-flex items-center justify-center h-12 w-12 rounded-full border ${
+                          className={`inline-flex items-center justify-center h-12 w-12 rounded-full border transition-colors ${
                             selectedStatuses.includes('scheduled')
-                              ? 'bg-blue-50 border-blue-200 text-blue-700'
-                              : 'bg-gray-100 border-gray-200 text-gray-400'
+                              ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-500 dark:border-blue-300 dark:text-white dark:ring-1 dark:ring-blue-300/80'
+                              : 'bg-muted border-border text-muted-foreground dark:bg-input/40'
                           }`}
                         >
-                          <Calendar className="h-5 w-5" />
+                          <Calendar
+                            className="h-5 w-5"
+                            style={{
+                              color: selectedStatuses.includes('scheduled')
+                                ? '#60a5fa' // azul visível no modo escuro
+                                : undefined,
+                            }}
+                          />
                         </button>
-                        <span className="text-xs text-gray-600">Agendadas</span>
+                        <span className="text-xs text-muted-foreground">Agendadas</span>
                       </div>
 
                       <div className="flex flex-col items-center gap-1">
@@ -517,15 +564,20 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                           aria-label="Em andamento"
                           aria-pressed={selectedStatuses.includes('in_progress')}
                           onClick={() => toggleStatus('in_progress')}
-                          className={`inline-flex items-center justify-center h-12 w-12 rounded-full border ${
+                          className={`inline-flex items-center justify-center h-12 w-12 rounded-full border transition-colors ${
                             selectedStatuses.includes('in_progress')
-                              ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
-                              : 'bg-gray-100 border-gray-200 text-gray-400'
+                              ? 'bg-yellow-50 border-yellow-200 text-yellow-700 dark:bg-amber-500 dark:border-amber-300 dark:text-amber-50 dark:ring-1 dark:ring-amber-300/80'
+                              : 'bg-muted border-border text-muted-foreground dark:bg-input/40'
                           }`}
                         >
-                          <Clock className="h-5 w-5" />
+                          <Clock
+                            className="h-5 w-5"
+                            style={{
+                              color: selectedStatuses.includes('in_progress') ? '#fbbf24' : undefined,
+                            }}
+                          />
                         </button>
-                        <span className="text-xs text-gray-600">Em andamento</span>
+                        <span className="text-xs text-muted-foreground">Em andamento</span>
                       </div>
 
                       <div className="flex flex-col items-center gap-1">
@@ -534,15 +586,20 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                           aria-label="Concluídas"
                           aria-pressed={selectedStatuses.includes('completed')}
                           onClick={() => toggleStatus('completed')}
-                          className={`inline-flex items-center justify-center h-12 w-12 rounded-full border ${
+                          className={`inline-flex items-center justify-center h-12 w-12 rounded-full border transition-colors ${
                             selectedStatuses.includes('completed')
-                              ? 'bg-green-50 border-green-200 text-green-700'
-                              : 'bg-gray-100 border-gray-200 text-gray-400'
+                              ? 'bg-green-50 border-green-200 text-green-700 dark:bg-emerald-500 dark:border-emerald-300 dark:text-emerald-50 dark:ring-1 dark:ring-emerald-300/80'
+                              : 'bg-muted border-border text-muted-foreground dark:bg-input/40'
                           }`}
                         >
-                          <CheckCircle className="h-5 w-5" />
+                          <CheckCircle
+                            className="h-5 w-5"
+                            style={{
+                              color: selectedStatuses.includes('completed') ? '#34d399' : undefined,
+                            }}
+                          />
                         </button>
-                        <span className="text-xs text-gray-600">Concluídas</span>
+                        <span className="text-xs text-muted-foreground">Concluídas</span>
                       </div>
 
                       <div className="flex flex-col items-center gap-1">
@@ -551,15 +608,20 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                           aria-label="Canceladas"
                           aria-pressed={selectedStatuses.includes('cancelled')}
                           onClick={() => toggleStatus('cancelled')}
-                          className={`inline-flex items-center justify-center h-12 w-12 rounded-full border ${
+                          className={`inline-flex items-center justify-center h-12 w-12 rounded-full border transition-colors ${
                             selectedStatuses.includes('cancelled')
-                              ? 'bg-red-50 border-red-200 text-red-700'
-                              : 'bg-gray-100 border-gray-200 text-gray-400'
+                              ? 'bg-red-50 border-red-200 text-red-700 dark:bg-rose-500 dark:border-rose-300 dark:text-rose-50 dark:ring-1 dark:ring-rose-300/80'
+                              : 'bg-muted border-border text-muted-foreground dark:bg-input/40'
                           }`}
                         >
-                          <XCircle className="h-5 w-5" />
+                          <XCircle
+                            className="h-5 w-5"
+                            style={{
+                              color: selectedStatuses.includes('cancelled') ? '#f87171' : undefined,
+                            }}
+                          />
                         </button>
-                        <span className="text-xs text-gray-600">Canceladas</span>
+                        <span className="text-xs text-muted-foreground">Canceladas</span>
                       </div>
                     </div>
                   </div>
@@ -567,11 +629,11 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
                 {!hideCompanyFilter && (
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs text-gray-500">Empresa</span>
+                    <span className="text-xs text-muted-foreground">Empresa</span>
                     <select
                       value={companyId}
                       onChange={(e) => setCompanyId(e.target.value)}
-                      className="border rounded px-3 py-2"
+                      className="border border-border bg-input text-foreground rounded px-3 py-2"
                     >
                       <option value="">Todas as empresas</option>
                       {companies.map((c: any) => (
@@ -587,7 +649,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                   <button
                     type="button"
                     onClick={() => setFiltersOpen(false)}
-                    className="rounded-lg border bg-white px-4 py-2 hover:bg-gray-50"
+                    className="rounded-lg border border-border bg-muted px-4 py-2 text-foreground hover:bg-muted/80"
                   >
                     Fechar
                   </button>
@@ -601,16 +663,14 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
         <div className="mb-6 flex flex-col gap-3">
           {selectedIds.length > 0 && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-              <span className="text-sm text-gray-700">
+              <span className="text-sm text-muted-foreground">
                 {selectedIds.length} selecionada(s)
               </span>
               <button
                 disabled={!canDelete}
                 onClick={deleteSelected}
                 className={`w-full sm:w-auto px-4 py-3 sm:py-2 rounded-lg text-white transition ${
-                  canDelete
-                    ? 'bg-red-600 hover:bg-red-700'
-                    : 'bg-gray-400 cursor-not-allowed'
+                  canDelete ? 'bg-destructive hover:bg-destructive/90' : 'bg-muted text-muted-foreground cursor-not-allowed'
                 }`}
               >
                 Excluir selecionadas
@@ -621,13 +681,13 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
         ) : filteredEvaluations.length === 0 ? (
-          <div className="text-center py-10 sm:py-12 bg-white rounded-lg shadow-md">
-            <ClipboardList className="w-12 h-12 sm:w-16 sm:h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-gray-900 mb-2">Nenhuma avaliação encontrada</h3>
-            <p className="text-gray-600 mb-6">
+          <div className="text-center py-10 sm:py-12 bg-card border border-border rounded-lg shadow-md">
+            <ClipboardList className="w-12 h-12 sm:w-16 sm:h-16 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-foreground mb-2">Nenhuma avaliação encontrada</h3>
+            <p className="text-muted-foreground mb-6">
               {evaluations.length === 0 
                 ? 'Comece agendando sua primeira avaliação'
                 : 'Tente ajustar os filtros de busca'
@@ -636,7 +696,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
             {evaluations.length === 0 && (
               <button
                 onClick={() => onNavigate('schedule')}
-                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors w-full sm:w-auto"
+                className="bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:opacity-90 transition-colors w-full sm:w-auto"
               >
                 Agendar Avaliação
               </button>
@@ -657,7 +717,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 	                return (
 	                  <div 
 	                    key={evaluation.id} 
-	                    className="bg-white rounded-lg shadow-md p-4 sm:p-6 hover:shadow-lg transition-shadow"
+	                    className="bg-card border border-border rounded-lg shadow-sm p-4 sm:p-6 hover:shadow-lg hover:shadow-primary/10 transition-shadow"
                     role="button"
                     tabIndex={0}
                     aria-label="Abrir avaliação"
@@ -680,13 +740,13 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 	                          {canDelete && (
 	                            <input
 	                              type="checkbox"
-	                              className="mt-1.5 h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+	                              className="mt-1.5 h-5 w-5 text-primary border-border rounded focus:ring-primary/60 bg-input"
 	                              checked={selectedIds.includes(evaluation.id)}
 	                              onChange={() => toggleSelect(evaluation.id)}
 	                            />
 	                          )}
 	                          <div className="min-w-0">
-	                            <h3 className="text-gray-900 truncate">{getCompanyName(evaluation.companyId)}</h3>
+	                            <h3 className="text-foreground truncate">{getCompanyName(evaluation.companyId)}</h3>
 	                            <span className={`inline-block mt-2 px-3 py-1 rounded-full text-sm ${statusBadge.color}`}>
 	                              {statusBadge.label}
 	                            </span>
@@ -723,7 +783,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 	                              <button
 	                                type="button"
 	                                onClick={() => openEditModal(evaluation)}
-	                                className="inline-flex items-center justify-center h-9 w-9 rounded-full border bg-blue-50 border-blue-200 text-blue-600"
+	                                className="inline-flex items-center justify-center h-9 w-9 rounded-full border border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
 	                                title="Editar vendedor avaliado"
 	                                aria-label="Editar vendedor avaliado"
 	                                data-no-nav
@@ -735,7 +795,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 	                        </div>
 	                      </div>
 
-	                      <div className="mt-4 space-y-3 text-sm text-gray-600">
+	                      <div className="mt-4 space-y-3 text-sm text-muted-foreground">
 	                        <div className="flex items-center gap-2">
 	                          <Calendar className="w-4 h-4" />
 	                          <span>
@@ -743,22 +803,22 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 	                          </span>
 	                        </div>
 	                        <div className="flex items-center gap-2">
-	                          <span className="text-gray-500">Vendedor</span>
-	                          <span className="text-gray-900">{getSellerLabel(evaluation)}</span>
+	                          <span className="text-muted-foreground/80">Vendedor</span>
+	                          <span className="text-foreground">{getSellerLabel(evaluation)}</span>
 	                        </div>
 	                        <div className="flex items-center gap-2">
-	                          <span className="text-gray-500">Voucher:</span>
-	                          <span className="font-mono">{evaluation.voucherCode}</span>
+	                          <span className="text-muted-foreground/80">Voucher:</span>
+	                          <span className="font-mono text-foreground">{evaluation.voucherCode}</span>
 	                        </div>
 	                      </div>
 
 	                      {evaluation.notes && (
-	                        <div className="mt-4 text-sm text-gray-600">
-	                          <span className="text-gray-500">Observações:</span> {evaluation.notes}
+	                        <div className="mt-4 text-sm text-muted-foreground">
+	                          <span className="text-muted-foreground/80">Observações:</span> {evaluation.notes}
 	                        </div>
 	                      )}
 
-	                      <div className="mt-4 text-sm text-blue-600">Clique para ver detalhes →</div>
+	                      <div className="mt-4 text-sm text-primary">Clique para ver detalhes →</div>
 	                    </div>
 
 	                    {/* Desktop layout */}
@@ -768,39 +828,39 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 	                          {canDelete && (
 	                            <input
 	                              type="checkbox"
-	                              className="mt-1.5 h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+	                              className="mt-1.5 h-5 w-5 text-primary border-border rounded focus:ring-primary/60 bg-input"
 	                              checked={selectedIds.includes(evaluation.id)}
 	                              onChange={() => toggleSelect(evaluation.id)}
 	                            />
 	                          )}
 	                          <div className="flex-1 min-w-0">
 	                            <div className="flex items-center gap-2 mb-2 min-w-0">
-	                              <h3 className="text-gray-900 truncate">{getCompanyName(evaluation.companyId)}</h3>
+	                              <h3 className="text-foreground truncate">{getCompanyName(evaluation.companyId)}</h3>
 	                              <span className={`px-3 py-1 rounded-full text-sm shrink-0 ${statusBadge.color}`}>
 	                                {statusBadge.label}
 	                              </span>
 	                            </div>
-	                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-gray-600">
+	                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-muted-foreground">
 	                              <div>
-	                                <span className="block text-gray-500">Vendedor</span>
+	                                <span className="block text-muted-foreground/80">Vendedor</span>
 	                                {getSellerLabel(evaluation)}
 	                              </div>
 	                              <div>
-	                                <span className="block text-gray-500">Data</span>
+	                                <span className="block text-muted-foreground/80">Data</span>
 	                                {new Date(evaluation.scheduledDate).toLocaleDateString('pt-BR')}
 	                              </div>
 	                              <div>
-	                                <span className="block text-gray-500">Período</span>
+	                                <span className="block text-muted-foreground/80">Período</span>
 	                                {evaluation.period}
 	                              </div>
 	                              <div>
-	                                <span className="block text-gray-500">Voucher</span>
+	                                <span className="block text-muted-foreground/80">Voucher</span>
 	                                {evaluation.voucherCode}
 	                              </div>
 	                            </div>
 	                            {evaluation.notes && (
-	                              <div className="mt-3 text-sm text-gray-600">
-	                                <span className="text-gray-500">Observações:</span> {evaluation.notes}
+	                              <div className="mt-3 text-sm text-muted-foreground">
+	                                <span className="text-muted-foreground/80">Observações:</span> {evaluation.notes}
 	                              </div>
 	                            )}
 	                          </div>
@@ -836,7 +896,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 	                            {canEditSeller && evaluation.status === 'completed' && (
 	                              <button
 	                                onClick={() => openEditModal(evaluation)}
-	                                className="p-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+	                                className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition-colors"
 	                                title="Editar vendedor avaliado"
 	                                data-no-nav
 	                              >
@@ -855,32 +915,32 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
         {editOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
             onClick={closeEditModal}
           >
             <div
-              className="bg-white rounded-lg max-w-xl w-full max-h-[90vh] overflow-y-auto"
+              className="bg-card text-foreground border border-border rounded-xl shadow-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3">
+              <div className="sticky top-0 bg-card border-b border-border px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-gray-900">Editar avaliação</h3>
+                  <h3 className="text-foreground">Editar avaliação</h3>
                   <button
                     type="button"
                     onClick={closeEditModal}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
+                    className="p-2 hover:bg-muted rounded-lg"
                     aria-label="Fechar"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
-                <p className="text-sm text-gray-600 mt-1">Altere o vendedor avaliado (admin).</p>
+                <p className="text-sm text-muted-foreground mt-1">Altere o vendedor avaliado (admin).</p>
               </div>
 
               <div className="p-4 space-y-4">
-                {editError && <div className="text-sm text-red-600">{editError}</div>}
+                {editError && <div className="text-sm text-destructive">{editError}</div>}
 
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 space-y-1">
+                <div className="bg-muted border border-border rounded-lg p-3 text-sm text-foreground space-y-1">
                   <div>
                     <strong>Empresa:</strong>{' '}
                     {editingEvaluation ? getCompanyName(editingEvaluation.companyId) : '-'}
@@ -902,16 +962,16 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                 </div>
 
                 <div className="space-y-1">
-                  <span className="text-xs text-gray-500">Vendedor avaliado</span>
+                  <span className="text-xs text-muted-foreground">Vendedor avaliado</span>
                   {editLoading ? (
-                    <div className="text-sm text-gray-600">Carregando equipe...</div>
+                    <div className="text-sm text-muted-foreground">Carregando equipe...</div>
                   ) : companyMembers.length === 0 ? (
-                    <div className="text-sm text-gray-600">Nenhum membro vinculado a esta empresa.</div>
+                    <div className="text-sm text-muted-foreground">Nenhum membro vinculado a esta empresa.</div>
                   ) : (
                     <select
                       value={selectedSellerId}
                       onChange={(e) => setSelectedSellerId(e.target.value)}
-                      className="w-full border rounded px-3 py-2"
+                      className="w-full border border-border bg-input text-foreground rounded px-3 py-2"
                     >
                       <option value="">Selecione um membro...</option>
                       {companyMembers.map((m: any) => (
@@ -927,7 +987,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                   <button
                     type="button"
                     onClick={closeEditModal}
-                    className="rounded-lg border bg-white px-4 py-2 hover:bg-gray-50"
+                    className="rounded-lg border border-border bg-muted px-4 py-2 hover:bg-muted/80 text-foreground"
                     disabled={editSaving}
                   >
                     Cancelar
@@ -935,7 +995,7 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
                   <button
                     type="button"
                     onClick={saveEditedSeller}
-                    className="rounded-lg bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-60"
+                    className="rounded-lg bg-primary text-primary-foreground px-4 py-2 hover:opacity-90 disabled:opacity-60"
                     disabled={editSaving || editLoading || !selectedSellerId || companyMembers.length === 0}
                   >
                     {editSaving ? 'Salvando...' : 'Salvar'}
@@ -948,28 +1008,28 @@ export function EvaluationsPage({ user, accessToken, onNavigate, onLogout }: Eva
 
         {/* Summary */}
         {!loading && evaluations.length > 0 && (
-          <div className="mt-6 bg-white rounded-lg shadow-md p-4 sm:p-6">
-            <h3 className="text-gray-900 mb-4">Resumo</h3>
+          <div className="mt-6 bg-card border border-border rounded-lg shadow-md p-4 sm:p-6">
+            <h3 className="text-foreground mb-4">Resumo</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <p className="text-gray-600 text-sm">Total</p>
-                <p className="text-2xl text-gray-900">{evaluations.length}</p>
+                <p className="text-muted-foreground text-sm">Total</p>
+                <p className="text-2xl text-foreground">{evaluations.length}</p>
               </div>
               <div>
-                <p className="text-gray-600 text-sm">Agendadas</p>
-                <p className="text-2xl text-blue-600">
+                <p className="text-muted-foreground text-sm">Agendadas</p>
+                <p className="text-2xl text-primary">
                   {evaluations.filter(e => e.status === 'scheduled').length}
                 </p>
               </div>
               <div>
-                <p className="text-gray-600 text-sm">Em Andamento</p>
-                <p className="text-2xl text-yellow-600">
+                <p className="text-muted-foreground text-sm">Em Andamento</p>
+                <p className="text-2xl text-amber-500">
                   {evaluations.filter(e => e.status === 'in_progress').length}
                 </p>
               </div>
               <div>
-                <p className="text-gray-600 text-sm">Concluídas</p>
-                <p className="text-2xl text-green-600">
+                <p className="text-muted-foreground text-sm">Concluídas</p>
+                <p className="text-2xl text-green-500">
                   {evaluations.filter(e => e.status === 'completed').length}
                 </p>
               </div>

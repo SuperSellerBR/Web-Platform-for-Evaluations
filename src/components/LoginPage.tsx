@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Eye, EyeOff, LogIn } from 'lucide-react';
+import { Eye, EyeOff, LogIn, Moon, Sun } from 'lucide-react';
+import { useTheme } from '../utils/theme';
 
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
+  const { resolvedTheme, setTheme } = useTheme();
   const [email, setEmail] = useState('admin@sistema.com');
   const [password, setPassword] = useState('admin123');
   const [showPassword, setShowPassword] = useState(false);
@@ -26,20 +28,62 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     setLoading(false);
   };
 
+  const isDark = resolvedTheme === 'dark';
+  const toggleTheme = () => setTheme(isDark ? 'light' : 'dark');
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 px-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6 sm:p-8">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-full mb-4">
-            <LogIn className="w-8 h-8 text-white" />
+    <div
+      className={`
+        min-h-screen flex items-center justify-center px-4 relative overflow-hidden transition-colors duration-500
+        ${isDark ? 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-slate-100' : 'bg-gradient-to-br from-blue-50 via-indigo-50 to-indigo-100 text-gray-900'}
+      `}
+    >
+      <div className="absolute inset-0 pointer-events-none">
+        <div className={`absolute -left-28 -top-20 w-72 h-72 rounded-full blur-3xl ${isDark ? 'bg-indigo-500/10' : 'bg-blue-200/50'}`} />
+        <div className={`absolute right-0 bottom-0 w-96 h-96 rounded-full blur-3xl ${isDark ? 'bg-cyan-500/10' : 'bg-indigo-200/60'}`} />
+      </div>
+
+      <div
+        className={`
+          relative max-w-md w-full rounded-2xl shadow-2xl border p-6 sm:p-8 backdrop-blur
+          ${isDark ? 'bg-slate-900/80 border-white/5 shadow-black/40' : 'bg-white/90 border-white/60'}
+        `}
+      >
+        <div className="flex items-start justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <div
+              className={`
+                inline-flex items-center justify-center w-14 h-14 rounded-2xl
+                ${isDark ? 'bg-gradient-to-br from-indigo-500 to-blue-600 shadow-lg shadow-blue-900/40' : 'bg-gradient-to-br from-blue-600 to-indigo-500 shadow-lg shadow-indigo-200'}
+              `}
+            >
+              <LogIn className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className={`text-xl font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Cliente Oculto</h1>
+              <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>Sistema de Gestão de Avaliações</p>
+            </div>
           </div>
-          <h1 className="text-gray-900 mb-2">Cliente Oculto</h1>
-          <p className="text-gray-600">Sistema de Gestão de Avaliações</p>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className={`
+              inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium transition-all duration-200 border
+              ${isDark ? 'bg-slate-800/80 border-white/10 text-slate-100 hover:bg-slate-800' : 'bg-white/70 border-gray-200 text-gray-700 hover:bg-white'}
+            `}
+            aria-pressed={isDark}
+            aria-label="Alternar tema"
+            title={isDark ? 'Usar modo claro' : 'Usar modo escuro'}
+          >
+            {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {isDark ? 'Modo claro' : 'Modo escuro'}
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label htmlFor="email" className="block text-gray-700 mb-2">
+            <label htmlFor="email" className={`block mb-2 text-sm font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>
               Email
             </label>
             <input
@@ -47,14 +91,19 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className={`
+                w-full px-4 py-3 rounded-xl border transition-all duration-200 focus:ring-2
+                ${isDark
+                  ? 'bg-slate-800/80 border-slate-700 text-slate-50 placeholder:text-slate-400 focus:ring-indigo-500/60 focus:border-indigo-500'
+                  : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-500 focus:ring-blue-500/30 focus:border-blue-500'}
+              `}
               placeholder="seu@email.com"
               required
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-gray-700 mb-2">
+            <label htmlFor="password" className={`block mb-2 text-sm font-medium ${isDark ? 'text-slate-200' : 'text-gray-700'}`}>
               Senha
             </label>
             <div className="relative">
@@ -63,14 +112,22 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`
+                  w-full px-4 py-3 rounded-xl border transition-all duration-200 pr-12 focus:ring-2
+                  ${isDark
+                    ? 'bg-slate-800/80 border-slate-700 text-slate-50 placeholder:text-slate-400 focus:ring-indigo-500/60 focus:border-indigo-500'
+                    : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-500 focus:ring-blue-500/30 focus:border-blue-500'}
+                `}
                 placeholder="••••••"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className={`
+                  absolute right-3 top-1/2 -translate-y-1/2 transition-colors
+                  ${isDark ? 'text-slate-400 hover:text-slate-200' : 'text-gray-400 hover:text-gray-600'}
+                `}
               >
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
@@ -78,7 +135,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            <div
+              className={`
+                px-4 py-3 rounded-xl border
+                ${isDark ? 'bg-red-500/10 border-red-500/30 text-red-100' : 'bg-red-50 border-red-200 text-red-700'}
+              `}
+            >
               {error}
             </div>
           )}
@@ -86,7 +148,13 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className={`
+              w-full py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all duration-200 shadow-lg
+              ${isDark
+                ? 'bg-gradient-to-r from-indigo-500 to-blue-500 hover:from-indigo-400 hover:to-blue-400 text-white shadow-blue-900/40'
+                : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-indigo-200'}
+              disabled:opacity-60 disabled:cursor-not-allowed
+            `}
           >
             {loading ? (
               <>
@@ -99,15 +167,20 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 Entrar
               </>
             )}
-          </button>
+            </button>
         </form>
 
-        <div className="mt-6 text-center text-sm text-gray-600">
+        <div className={`mt-6 text-center text-sm ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>
           <p>Parceiros: use seu email e os 6 primeiros dígitos do CPF</p>
         </div>
 
-        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <p className="text-sm text-blue-800">
+        <div
+          className={`
+            mt-4 p-4 rounded-xl border text-sm
+            ${isDark ? 'bg-slate-800/60 border-white/10 text-slate-100' : 'bg-blue-50 border-blue-200 text-blue-900'}
+          `}
+        >
+          <p className="text-sm">
             <span className="block mb-1">✨ <strong>Primeiro Acesso:</strong></span>
             <span className="block">Email: <strong>admin@sistema.com</strong></span>
             <span className="block">Senha: <strong>admin123</strong></span>

@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { projectId } from "../utils/supabase/info";
 import { toEditor, defaultTheme } from "../questEditorAdapter";
 import { Question, Section, Theme } from "../questEditor/src/types";
-import { Star } from "lucide-react";
+import { Star, ChevronsUpDown, Check } from "lucide-react";
 import { Button } from "../questEditor/src/components/ui/button";
 import { Label } from "../questEditor/src/components/ui/label";
 import {
@@ -18,6 +18,16 @@ import {
   SelectValue,
 } from "../questEditor/src/components/ui/select";
 import { Textarea } from "../questEditor/src/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "../questEditor/src/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+} from "../questEditor/src/components/ui/command";
+import { cn } from "../questEditor/src/components/ui/utils";
+import { useTheme } from "../utils/theme";
 
 interface SurveyRendererProps {
   surveyId: string;
@@ -32,6 +42,8 @@ export function SurveyRenderer({
   evaluationId,
   onSubmitted,
 }: SurveyRendererProps) {
+  const stripCode = (title: string) =>
+    title.replace(/^\s*[A-Za-z][\w/:-]*\.\d+\)\s*/, "").trim();
   const [surveyTitle, setSurveyTitle] = useState("");
   const [sections, setSections] = useState<Section[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -40,12 +52,11 @@ export function SurveyRenderer({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
   const draftKey = `surveyDraft:${evaluationId || surveyId}`;
-  const [stage, setStage] = useState<"visit" | "questions" | "attachments" | "review">("visit");
+  const [stage, setStage] = useState<"visit" | "questions">("visit");
 
   useEffect(() => {
     loadSurvey();
@@ -57,8 +68,33 @@ export function SurveyRenderer({
     endTime: "",
     vendors: "",
   });
-  const [receipt, setReceipt] = useState<{ name: string; url: string; path: string } | null>(null);
-  const [photos, setPhotos] = useState<{ name: string; url: string; path: string }[]>([]);
+  const [sellerOptions, setSellerOptions] = useState<string[]>([]);
+  const [selectedSeller, setSelectedSeller] = useState<string>("");
+  const [sellerLoading, setSellerLoading] = useState(false);
+  const sellerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [sellerPopoverOpen, setSellerPopoverOpen] = useState(false);
+  const [sellerPopoverSide, setSellerPopoverSide] = useState<"top" | "bottom">("bottom");
+  const sellerOptionSet = useMemo(() => new Set(sellerOptions.map((s) => s.trim()).filter(Boolean)), [sellerOptions]);
+  const [submittedResponseId, setSubmittedResponseId] = useState<string>("");
+  const { resolvedTheme } = useTheme();
+  const textColor = resolvedTheme === "dark" ? "#e5e7eb" : theme.textColor;
+  const mutedTextColor = resolvedTheme === "dark" ? "#cbd5e1" : theme.textColor;
+
+  useEffect(() => {
+    const computeSide = () => {
+      if (typeof window === "undefined") return;
+      setSellerPopoverSide(window.innerWidth < 640 ? "top" : "bottom");
+    };
+    computeSide();
+    window.addEventListener("resize", computeSide);
+    return () => window.removeEventListener("resize", computeSide);
+  }, []);
+
+  useEffect(() => {
+    if (sellerPopoverOpen && sellerTriggerRef.current) {
+      sellerTriggerRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [sellerPopoverOpen]);
 
   useEffect(() => {
     // Apenas salva se houver respostas ou seções carregadas
@@ -68,9 +104,8 @@ export function SurveyRenderer({
       currentSectionIndex,
       answers,
       visitData,
-      receipt,
-      photos,
       stage,
+      submittedResponseId,
       ts: Date.now(),
     };
     try {
@@ -78,7 +113,7 @@ export function SurveyRenderer({
     } catch (_) {
       // Ignora quota/storage errors
     }
-  }, [answers, currentSectionIndex, sections.length, visitData, receipt, photos, stage]);
+  }, [answers, currentSectionIndex, sections.length, visitData, stage, submittedResponseId]);
 
   const loadSurvey = async () => {
     setLoading(true);
@@ -120,43 +155,39 @@ export function SurveyRenderer({
               endTime: draft.visitData?.endTime || "",
               vendors: draft.visitData?.vendors || "",
             });
-            setReceipt(draft.receipt || null);
-            setPhotos(draft.photos || []);
-            setStage(draft.stage || "visit");
+            setSubmittedResponseId(draft.submittedResponseId || "");
+            setStage(draft.stage === "visit" ? "visit" : "questions");
           } else {
             setCurrentSectionIndex(0);
             setAnswers({});
             setVisitData({
-              startTime: new Date().toISOString().slice(11, 16),
+              startTime: "",
               endTime: "",
               vendors: "",
             });
-            setReceipt(null);
-            setPhotos([]);
+            setSubmittedResponseId("");
             setStage("visit");
           }
         } else {
           setCurrentSectionIndex(0);
           setAnswers({});
           setVisitData({
-            startTime: new Date().toISOString().slice(11, 16),
+            startTime: "",
             endTime: "",
             vendors: "",
           });
-          setReceipt(null);
-          setPhotos([]);
+          setSubmittedResponseId("");
           setStage("visit");
         }
       } catch {
         setCurrentSectionIndex(0);
         setAnswers({});
         setVisitData({
-          startTime: new Date().toISOString().slice(11, 16),
+          startTime: "",
           endTime: "",
           vendors: "",
         });
-        setReceipt(null);
-        setPhotos([]);
+        setSubmittedResponseId("");
         setStage("visit");
       }
       setErrors({});
@@ -173,26 +204,96 @@ export function SurveyRenderer({
     ? questions.filter((q) => currentSection.questionIds.includes(q.id))
     : [];
 
-  const uploadFile = async (file: File, folder: string) => {
-    setUploading(true);
-    const form = new FormData();
-    form.append("file", file);
-    form.append("folder", folder);
-    const res = await fetch(
-      `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/upload`,
-      {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
-        body: form,
+  // Fetch vendedores vinculados à avaliação/empresa para o seletor
+  useEffect(() => {
+    const fetchSellers = async () => {
+      setSellerLoading(true);
+      try {
+        const candidates: string[] = [];
+        let evalCompanyId = "";
+        const res = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations/${evaluationId}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        const data = await res.json();
+        if (res.ok) {
+          const evalData = data?.evaluation || {};
+          const company = data?.company || {};
+          evalCompanyId = (evalData?.companyId || company?.id || company?.companyId || "").toString().trim();
+
+          const pushStr = (raw: any) => {
+            if (!raw) return;
+            if (Array.isArray(raw)) {
+              raw.forEach((v) => {
+                const s = String(v || "").trim();
+                if (s) candidates.push(s);
+              });
+            } else if (typeof raw === "string") {
+              raw
+                .split(",")
+                .map((v) => v.trim())
+                .filter(Boolean)
+                .forEach((s) => candidates.push(s));
+            }
+          };
+
+        pushStr(evalData?.visitData?.vendors || evalData?.visitData?.sellers);
+        if (!visitData.endTime && evalData?.voucherValidatedAt) {
+          const time = String(evalData.voucherValidatedAt).slice(11, 16);
+          if (time) {
+            setVisitData((v) => ({ ...v, endTime: time }));
+          }
+        }
+          pushStr(company?.vendors || company?.sellers);
+          if (Array.isArray(company?.partners)) {
+            company.partners.forEach((p: any) => {
+              const role = (p?.role || "").toString().toLowerCase();
+              if (role === "seller" || role === "vendedor") {
+                const name = (p?.name || p?.email || p?.id || "").toString().trim();
+                if (name) candidates.push(name);
+              }
+            });
+          }
+        }
+
+        try {
+          const partnersRes = await fetch(
+            `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/partners`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          if (partnersRes.ok) {
+            const partnersJson = await partnersRes.json();
+            const partnersList = partnersJson?.partners || [];
+            partnersList.forEach((p: any) => {
+              const role = (p?.role || "").toString().toLowerCase();
+              const matchesCompany =
+                !evalCompanyId || (p?.companyId && p.companyId.toString() === evalCompanyId);
+              if (matchesCompany && (role === "seller" || role === "vendedor")) {
+                const name = (p?.name || p?.email || p?.id || "").toString().trim();
+                if (name) candidates.push(name);
+              }
+            });
+          }
+        } catch {
+          // ignore partners fetch errors, we still use evaluation/company data
+        }
+
+        const unique = Array.from(new Set([...candidates.filter(Boolean), "Outro"]));
+        setSellerOptions(unique);
+      } catch {
+        // silêncio
+      } finally {
+        setSellerLoading(false);
       }
-    );
-    const data = await res.json();
-    setUploading(false);
-    if (!res.ok) {
-      throw new Error(data.error || "Erro ao enviar arquivo");
+    };
+    fetchSellers();
+  }, [accessToken, evaluationId]);
+
+  useEffect(() => {
+    if (visitData.vendors && sellerOptionSet.has(visitData.vendors)) {
+      setSelectedSeller(visitData.vendors);
     }
-    return { name: file.name, url: data.url, path: data.path };
-  };
+  }, [visitData.vendors, sellerOptionSet]);
 
   const updateAnswer = (questionId: string, value: any) => {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
@@ -221,13 +322,6 @@ export function SurveyRenderer({
       newErrors["_vendors"] = "Informe o(s) vendedor(es)";
       ok = false;
     }
-    // anexos obrigatórios
-    if (stage === "attachments" || stage === "review") {
-      if (!receipt) {
-        newErrors["_receipt"] = "Anexe o comprovante de consumo";
-        ok = false;
-      }
-    }
     currentQuestions.forEach((q) => {
       if (q.type === "intro-page" || q.type === "thank-you-page") return;
       if (q.required) {
@@ -254,32 +348,68 @@ export function SurveyRenderer({
     setSaving(true);
     setError("");
     try {
-      const payload = {
-        evaluationId,
-        visitData,
-        receipt,
-        photos,
-        answers: Object.keys(answers).map((questionId) => ({
-          questionId,
-          value: answers[questionId],
-        })),
-      };
-      const res = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/surveys/${surveyId}/responses`,
+      const answersPayload = Object.keys(answers).map((questionId) => ({
+        questionId,
+        value: answers[questionId],
+      }));
+      const nowIso = new Date().toISOString();
+
+      let responseId = submittedResponseId;
+      let sectionResults: any[] | undefined;
+      if (!responseId) {
+        const payload = {
+          evaluationId,
+          visitData,
+          answers: answersPayload,
+        };
+        const res = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/surveys/${surveyId}/responses`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          }
+        );
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Erro ao enviar respostas");
+          return;
+        }
+        responseId = data.responseId;
+        sectionResults = data.sectionResults;
+        setSubmittedResponseId(responseId);
+      }
+
+      // Persistir o envio na avaliação (para admins verem respostas e para evitar reenvio)
+      const updateRes = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/evaluations/${evaluationId}`,
         {
-          method: "POST",
+          method: "PUT",
           headers: {
             Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            stage: "survey_submitted",
+            surveyResponseId: responseId,
+            surveyData: {
+              answers: answersPayload,
+              visitData,
+              submittedAt: nowIso,
+              sectionResults,
+            },
+          }),
         }
       );
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Erro ao enviar respostas");
+      const updateData = await updateRes.json().catch(() => ({}));
+      if (!updateRes.ok) {
+        setError(updateData.error || "Respostas enviadas, mas não foi possível salvar na avaliação. Tente novamente.");
         return;
       }
+
       // Limpa rascunho local ao concluir o envio
       try {
         localStorage.removeItem(draftKey);
@@ -307,24 +437,13 @@ export function SurveyRenderer({
         setCurrentSectionIndex((i) => i + 1);
         window.scrollTo({ top: 0 });
       } else {
-        setStage("attachments");
+        handleSubmit();
       }
       return;
-    }
-    if (stage === "attachments") {
-      setStage("review");
-      return;
-    }
-    if (stage === "review") {
-      handleSubmit();
     }
   };
 
   const handleBack = () => {
-    if (stage === "attachments") {
-      setStage("questions");
-      return;
-    }
     if (stage === "questions") {
       if (currentSectionIndex > 0) {
         setCurrentSectionIndex((i) => i - 1);
@@ -341,13 +460,25 @@ export function SurveyRenderer({
 
     switch (question.type) {
       case "multiple-choice":
+        const opts = question.options || [];
+        const normalized = opts.map((o) =>
+          o
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase()
+            .trim()
+        );
+        const isYesNo =
+          normalized.length === 2 &&
+          normalized.includes("sim") &&
+          (normalized.includes("nao") || normalized.includes("não"));
         return (
           <RadioGroup
             value={answers[question.id]}
             onValueChange={(val) => updateAnswer(question.id, val)}
-            className="space-y-2"
+            className={isYesNo ? "grid grid-cols-2 gap-3" : "space-y-2"}
           >
-            {question.options?.map((option, idx) => (
+            {opts.map((option, idx) => (
               <div
                 key={idx}
                 className="flex items-center space-x-2 p-3 border rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
@@ -369,7 +500,7 @@ export function SurveyRenderer({
                   className="flex-1 cursor-pointer"
                   style={{
                     fontFamily: theme.fontFamily,
-                    color: theme.textColor,
+                    color: textColor,
                   }}
                 >
                   {option}
@@ -421,7 +552,7 @@ export function SurveyRenderer({
                   className="flex-1 cursor-pointer"
                   style={{
                     fontFamily: theme.fontFamily,
-                    color: theme.textColor,
+                    color: textColor,
                   }}
                 >
                   {option}
@@ -472,7 +603,8 @@ export function SurveyRenderer({
             style={{
               borderRadius: theme.borderRadius,
               fontFamily: theme.fontFamily,
-              borderColor: hasError ? "#EF4444" : undefined,
+              borderColor: hasError ? "#EF4444" : "#D1D5DB",
+              borderWidth: "1px",
             }}
           />
         );
@@ -480,14 +612,15 @@ export function SurveyRenderer({
       case "rating":
         return (
           <div className="space-y-3">
-            <div className="flex justify-between text-sm px-1" style={{ color: theme.textColor, opacity: 0.6 }}>
+            <div className="flex justify-between text-sm px-1" style={{ color: mutedTextColor, opacity: 0.8 }}>
               <span>{question.scale?.minLabel || question.scale?.min}</span>
               <span>{question.scale?.maxLabel || question.scale?.max}</span>
             </div>
             <div className="flex gap-2 justify-center">
               {Array.from({ length: (question.scale?.max || 5) - (question.scale?.min || 1) + 1 }, (_, i) => {
+                const currentVal = Number(answers[question.id]) || 0;
                 const val = (question.scale?.min || 1) + i;
-                const isSelected = answers[question.id] === val;
+                const isFilled = currentVal >= val;
                 return (
                   <button
                     key={i}
@@ -497,8 +630,8 @@ export function SurveyRenderer({
                   >
                     <Star
                       className="w-8 h-8"
-                      fill={isSelected ? theme.primaryColor : "#E5E7EB"}
-                      stroke={isSelected ? theme.primaryColor : "#9CA3AF"}
+                      fill={isFilled ? theme.primaryColor : "#E5E7EB"}
+                      stroke={isFilled ? theme.primaryColor : "#9CA3AF"}
                     />
                   </button>
                 );
@@ -519,7 +652,8 @@ export function SurveyRenderer({
                 <div className="flex gap-1">
                   {Array.from({ length: max }, (_, i) => {
                     const val = i + 1;
-                    const selected = current[item] === val;
+                    const selectedVal = Number(current[item]) || 0;
+                    const isFilled = selectedVal >= val;
                     return (
                       <button
                         key={val}
@@ -529,8 +663,8 @@ export function SurveyRenderer({
                       >
                         <Star
                           className="w-6 h-6"
-                          fill={selected ? theme.primaryColor : "#E5E7EB"}
-                          stroke={selected ? theme.primaryColor : "#9CA3AF"}
+                          fill={isFilled ? theme.primaryColor : "#E5E7EB"}
+                          stroke={isFilled ? theme.primaryColor : "#9CA3AF"}
                         />
                       </button>
                     );
@@ -636,7 +770,7 @@ export function SurveyRenderer({
             </div>
             <div
               className="flex justify-between text-sm font-medium"
-              style={{ color: theme.textColor, opacity: 0.6 }}
+              style={{ color: mutedTextColor, opacity: 0.8 }}
             >
               <span>{question.scale?.minLabel}</span>
               <span>{question.scale?.maxLabel}</span>
@@ -647,7 +781,7 @@ export function SurveyRenderer({
       case "nps":
         return (
           <div className="space-y-3">
-            <div className="flex gap-1 w-full overflow-x-auto pb-2 whitespace-nowrap px-1">
+            <div className="flex gap-1 w-full overflow-x-auto pb-2 whitespace-nowrap px-1 justify-center">
               {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
                 const isSelected = answers[question.id] === n;
                 let bgColor = "bg-gray-50";
@@ -738,9 +872,6 @@ export function SurveyRenderer({
     <div className="w-full overflow-x-hidden">
       <div className="w-full max-w-full overflow-x-hidden">
         <div className="mb-4 sm:mb-6">
-          <h3 className="text-lg font-bold text-gray-900">
-            {surveyTitle || "Questionário"}
-          </h3>
           {error && <div className="text-red-600 text-sm mt-2">{error}</div>}
           {success && <div className="text-green-600 text-sm mt-2">{success}</div>}
         </div>
@@ -751,18 +882,90 @@ export function SurveyRenderer({
           </div>
         ) : (
           <>
-            {/* Etapas simples */}
-            <div className="grid grid-cols-2 gap-2 text-sm text-gray-600 mb-3">
-              <span className={`px-2 py-1 rounded ${stage === "visit" ? "bg-blue-100 text-blue-800" : ""}`}>1. Dados da visita</span>
-              <span className={`px-2 py-1 rounded ${stage === "questions" ? "bg-blue-100 text-blue-800" : ""}`}>2. Questionário</span>
-              <span className={`px-2 py-1 rounded ${stage === "attachments" ? "bg-blue-100 text-blue-800" : ""}`}>3. Anexos</span>
-              <span className={`px-2 py-1 rounded ${stage === "review" ? "bg-blue-100 text-blue-800" : ""}`}>4. Revisão</span>
-            </div>
-
             {/* Bloco de dados da visita apenas na primeira etapa */}
             {stage === "visit" && (
               <div className="space-y-3 mb-4 w-full max-w-full">
                 <div className="text-sm font-semibold text-gray-800">Dados da visita</div>
+                <div className="w-full">
+                  <label className="text-sm text-gray-700">Vendedor(es) atendentes</label>
+                  <Popover open={sellerPopoverOpen} onOpenChange={setSellerPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        ref={sellerTriggerRef}
+                        variant="outline"
+                        role="combobox"
+                    className="w-full justify-between mt-1 text-base font-normal"
+                  >
+                    <span className="truncate">
+                      {selectedSeller || visitData.vendors || "Selecione"}
+                    </span>
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      side={sellerPopoverSide}
+                      sideOffset={16}
+                      className="p-0 w-[min(420px,calc(100vw-32px))]"
+                    >
+                      <Command>
+                        <CommandInput
+                          placeholder="Buscar vendedor..."
+                          className="text-base"
+                          disabled={sellerLoading}
+                        />
+                        {sellerLoading ? (
+                          <div className="py-3 px-4 text-sm text-muted-foreground">
+                            Carregando a lista de vendedores...
+                          </div>
+                        ) : (
+                          <>
+                            <CommandEmpty>Nenhum vendedor encontrado.</CommandEmpty>
+                            <CommandGroup className="max-h-[40vh] overflow-y-auto">
+                              {sellerOptions.map((option) => (
+                                <CommandItem
+                                  key={option}
+                                  value={option}
+                                  className="text-base"
+                                  onSelect={(_value) => {
+                                    const chosen = option; // value could be lowercase; keep label
+                                    const isOther = chosen.toLowerCase() === "outro";
+                                    setSelectedSeller(chosen);
+                                    setSellerPopoverOpen(false);
+                                    setVisitData((v) => ({
+                                      ...v,
+                                      vendors: isOther ? "" : chosen,
+                                    }));
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      selectedSeller === option ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <span className="truncate">{option}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </>
+                        )}
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {((selectedSeller && selectedSeller.toLowerCase() === "outro") ||
+                    (!selectedSeller && visitData.vendors && !sellerOptionSet.has(visitData.vendors))) && (
+                    <input
+                      type="text"
+                      className="w-full border rounded-md px-3 py-2 mt-2 text-base"
+                      placeholder="Digite o nome do vendedor"
+                      value={visitData.vendors}
+                      onChange={(e) => setVisitData((v) => ({ ...v, vendors: e.target.value }))}
+                    />
+                  )}
+                  {errors["_vendors"] && (
+                    <div className="text-xs text-red-600 mt-1">{errors["_vendors"]}</div>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="w-full">
                     <label className="text-sm text-gray-700">Início</label>
@@ -788,19 +991,6 @@ export function SurveyRenderer({
                       <div className="text-xs text-red-600 mt-1">{errors["_endTime"]}</div>
                     )}
                   </div>
-                </div>
-                <div className="w-full">
-                  <label className="text-sm text-gray-700">Vendedor(es) atendentes</label>
-                  <input
-                    type="text"
-                    className="w-full border rounded-md px-3 py-2 mt-1"
-                    placeholder="Selecione ou digite (separe por vírgula para múltiplos)"
-                    value={visitData.vendors}
-                    onChange={(e) => setVisitData((v) => ({ ...v, vendors: e.target.value }))}
-                  />
-                  {errors["_vendors"] && (
-                    <div className="text-xs text-red-600 mt-1">{errors["_vendors"]}</div>
-                  )}
                 </div>
                 <div className="h-px bg-gray-200 mt-2" />
               </div>
@@ -852,9 +1042,9 @@ export function SurveyRenderer({
                           className={`font-semibold mb-2 ${
                             isPageBlock ? "text-2xl sm:text-3xl" : "text-lg"
                           }`}
-                          style={{ color: theme.textColor, fontFamily: theme.fontFamily }}
+                          style={{ color: textColor, fontFamily: theme.fontFamily }}
                         >
-                          {question.title}
+                          {stripCode(question.title || "")}
                         </h3>
                         {question.description && (
                           <p className="text-sm text-gray-600 mb-4">{question.description}</p>
@@ -878,99 +1068,7 @@ export function SurveyRenderer({
               </div>
             )}
 
-            {stage === "attachments" && (
-              <div className="space-y-4 w-full max-w-full">
-                <div className="rounded-lg border p-4">
-                  <h4 className="font-semibold text-gray-900 mb-2">Comprovante de consumo (obrigatório)</h4>
-                  {!receipt && (
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        try {
-                          const uploaded = await uploadFile(file, "receipt");
-                          setReceipt(uploaded);
-                        } catch (err: any) {
-                          setError(err.message || "Erro ao enviar comprovante");
-                        }
-                      }}
-                    />
-                  )}
-                  {receipt && (
-                    <div className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2 mt-2">
-                      <span className="text-sm text-gray-700 truncate">{receipt.name}</span>
-                      <button
-                        className="text-xs text-red-600"
-                        onClick={() => setReceipt(null)}
-                      >
-                        Remover
-                      </button>
-                    </div>
-                  )}
-                  {errors["_receipt"] && (
-                    <div className="text-xs text-red-600 mt-1">{errors["_receipt"]}</div>
-                  )}
-                </div>
-
-                <div className="rounded-lg border p-4">
-                  <h4 className="font-semibold text-gray-900 mb-2">Fotos do local (opcional)</h4>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={async (e) => {
-                      const files = Array.from(e.target.files || []);
-                      if (!files.length) return;
-                      try {
-                        const uploadedAll = [];
-                        for (const f of files) {
-                          const up = await uploadFile(f, "photo");
-                          uploadedAll.push(up);
-                        }
-                        setPhotos((prev) => [...prev, ...uploadedAll]);
-                      } catch (err: any) {
-                        setError(err.message || "Erro ao enviar fotos");
-                      }
-                    }}
-                  />
-                  {photos.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {photos.map((p, idx) => (
-                        <div
-                          key={p.path + idx}
-                          className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2"
-                        >
-                          <span className="text-sm text-gray-700 truncate">{p.name}</span>
-                          <button
-                            className="text-xs text-red-600"
-                            onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}
-                          >
-                            Remover
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {stage === "review" && (
-              <div className="space-y-4 w-full max-w-full">
-                <div className="rounded-lg border p-4 bg-gray-50">
-                  <h4 className="font-semibold text-gray-900 mb-3">Revisão</h4>
-                  <div className="space-y-2 text-sm text-gray-800">
-                    <div><strong>Início:</strong> {visitData.startTime || "-"}</div>
-                    <div><strong>Término:</strong> {visitData.endTime || "-"}</div>
-                    <div><strong>Vendedores:</strong> {visitData.vendors || "-"}</div>
-                    <div><strong>Comprovante:</strong> {receipt ? receipt.name : "Pendente"}</div>
-                    <div><strong>Fotos:</strong> {photos.length} anexos</div>
-                  </div>
-                </div>
-              </div>
-            )}
+            
 
             {/* Navegação */}
             <div className="flex flex-col sm:flex-row items-center justify-end mt-6 gap-3">
@@ -979,21 +1077,20 @@ export function SurveyRenderer({
                   variant="outline"
                   className="flex-1 sm:flex-none"
                   onClick={handleBack}
-                  disabled={saving || (stage === "visit" && true)}
+                  disabled={saving || stage === "visit"}
                   style={{ borderRadius: theme.borderRadius }}
                 >
                   Voltar
                 </Button>
                 <Button
-                  className="flex-1 sm:flex-none"
+                  className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white"
                   onClick={handleNextStage}
                   disabled={saving}
                   style={{
-                    backgroundColor: theme.primaryColor,
                     borderRadius: theme.borderRadius,
                   }}
                 >
-                  {stage === "review"
+                  {stage === "questions" && currentSectionIndex >= sections.length - 1
                     ? saving
                       ? "Enviando..."
                       : "Enviar respostas"
@@ -1004,12 +1101,12 @@ export function SurveyRenderer({
           </>
         )}
       </div>
-      {(uploading || saving) && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg px-6 py-4 shadow-lg flex items-center gap-3">
-            <div className="w-6 h-6 border-2 border-gray-300 border-t-blue-600 rounded-full animate-spin" />
-            <div className="text-sm text-gray-800">
-              {uploading ? "Enviando arquivo..." : "Enviando sua avaliação..."}
+      {saving && (
+        <div className="fixed inset-0 z-[60] backdrop-blur-sm bg-black/50 flex items-center justify-center">
+          <div className="bg-white dark:bg-slate-800 rounded-lg px-6 py-4 shadow-lg flex items-center gap-3 border border-gray-200 dark:border-slate-700">
+            <div className="w-6 h-6 border-2 border-gray-300 dark:border-slate-500 border-t-blue-600 rounded-full animate-spin" />
+            <div className="text-sm text-gray-800 dark:text-slate-100">
+              Enviando respostas...
             </div>
           </div>
         </div>
