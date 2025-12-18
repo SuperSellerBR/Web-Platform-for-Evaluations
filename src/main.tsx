@@ -23,4 +23,23 @@ createRoot(document.getElementById("root")!).render(
     </ThemeProvider>
   </QueryClientProvider>
 );
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    (window as any).__pwaInstallPrompt = event;
+  });
+
+  window.addEventListener("appinstalled", () => {
+    (window as any).__pwaInstallPrompt = null;
+  });
+}
+
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      // no-op
+    });
+  });
+}
   

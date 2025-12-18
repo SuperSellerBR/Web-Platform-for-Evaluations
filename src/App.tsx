@@ -151,6 +151,19 @@ export default function App() {
     }
   };
 
+  const handleGoogleLogin = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/v1/callback`,
+      },
+    });
+
+    if (error) {
+      throw error;
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -172,7 +185,7 @@ export default function App() {
   }
 
   if (!user || !accessToken) {
-    return <LoginPage onLogin={handleLogin} />;
+    return <LoginPage onLogin={handleLogin} onGoogleLogin={handleGoogleLogin} />;
   }
 
   return (

@@ -4,14 +4,16 @@ import { useTheme } from '../utils/theme';
 
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  onGoogleLogin: () => Promise<void>;
 }
 
-export function LoginPage({ onLogin }: LoginPageProps) {
+export function LoginPage({ onLogin, onGoogleLogin }: LoginPageProps) {
   const { resolvedTheme, setTheme } = useTheme();
   const [email, setEmail] = useState('admin@sistema.com');
   const [password, setPassword] = useState('admin123');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -26,6 +28,19 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     }
 
     setLoading(false);
+  };
+
+  const handleGoogleClick = async () => {
+    setError('');
+    setGoogleLoading(true);
+    try {
+      await onGoogleLogin();
+    } catch (err: any) {
+      console.error(err);
+      setError(err?.message || 'Erro ao entrar com o Google');
+    } finally {
+      setGoogleLoading(false);
+    }
   };
 
   const isDark = resolvedTheme === 'dark';
@@ -168,6 +183,39 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </>
             )}
             </button>
+
+          <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400 font-semibold justify-center">
+            <span className="h-px w-10 bg-current/30" />
+            ou
+            <span className="h-px w-10 bg-current/30" />
+          </div>
+
+          <button
+            type="button"
+            disabled={googleLoading}
+            onClick={handleGoogleClick}
+            className={`
+              w-full py-3 rounded-xl font-semibold flex items-center justify-center gap-3 transition-all duration-200 border shadow-sm
+              ${isDark
+                ? 'bg-slate-800/80 border-white/10 text-slate-100 hover:bg-slate-800'
+                : 'bg-white border-gray-200 text-gray-800 hover:shadow-md'}
+              disabled:opacity-60 disabled:cursor-not-allowed
+            `}
+          >
+            {googleLoading ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-current"></div>
+                Entrando com Google...
+              </>
+            ) : (
+              <>
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white">
+                  <span className="text-xs font-black text-gray-800">G</span>
+                </span>
+                Continuar com Google
+              </>
+            )}
+          </button>
         </form>
 
         <div className={`mt-6 text-center text-sm ${isDark ? 'text-slate-300' : 'text-gray-600'}`}>

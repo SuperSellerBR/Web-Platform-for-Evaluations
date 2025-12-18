@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Layout } from './Layout';
-import { ChevronRight, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { useTheme } from '../utils/theme';
-import { projectId } from '../utils/supabase/info';
+import { PwaInstallButton } from './PwaInstallButton';
 
 const ALLOW_REPEATS_KEY = 'schedule:allowRepeats';
 const readAllowRepeats = () => {
@@ -17,13 +17,9 @@ interface SettingsPageProps {
   onLogout: () => void;
 }
 
-export function SettingsPage({ user, accessToken, onNavigate, onLogout }: SettingsPageProps) {
+export function SettingsPage({ user, onNavigate, onLogout }: SettingsPageProps) {
   const [allowRepeats, setAllowRepeats] = useState(true);
   const [open, setOpen] = useState(true);
-  const [instaHandle, setInstaHandle] = useState('');
-  const [instaUrl, setInstaUrl] = useState('');
-  const [instaError, setInstaError] = useState('');
-  const [instaLoading, setInstaLoading] = useState(false);
   const { theme, resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
@@ -40,29 +36,6 @@ export function SettingsPage({ user, accessToken, onNavigate, onLogout }: Settin
     setAllowRepeats(value);
     localStorage.setItem(ALLOW_REPEATS_KEY, value ? 'true' : 'false');
     window.dispatchEvent(new CustomEvent('allowRepeatsChanged', { detail: value }));
-  };
-
-  const getInstaAvatar = async () => {
-    setInstaError('');
-    setInstaUrl('');
-    const handle = instaHandle.trim().replace(/^@/, '');
-    if (!handle) {
-      setInstaError('Informe um @ válido.');
-      return;
-    }
-    setInstaLoading(true);
-    try {
-      const url = `https://${projectId}.supabase.co/functions/v1/make-server-7946999d/instagram-avatar?handle=${encodeURIComponent(handle)}`;
-      const head = await fetch(url, { method: 'HEAD' });
-      if (!head.ok) {
-        throw new Error('Não foi possível obter a foto.');
-      }
-      setInstaUrl(url);
-    } catch (err: any) {
-      setInstaError(err?.message || 'Falha ao buscar a foto.');
-    } finally {
-      setInstaLoading(false);
-    }
   };
 
   return (
@@ -113,50 +86,18 @@ export function SettingsPage({ user, accessToken, onNavigate, onLogout }: Settin
 
           <div className="bg-card border border-border rounded-lg shadow-sm overflow-hidden">
             <div className="px-4 py-3 sm:px-6 sm:py-4 border-b border-border flex items-center gap-3">
-              <ImageIcon className="w-5 h-5 text-muted-foreground" />
               <div>
-                <p className="text-foreground font-medium">Teste de avatar do Instagram</p>
-                <p className="text-sm text-muted-foreground">Digite um @ para ver a foto retornada pela função</p>
+                <p className="text-foreground font-medium">Instalar aplicativo</p>
+                <p className="text-sm text-muted-foreground">
+                  Adicione à tela inicial para abrir em tela cheia e acessar mais rápido.
+                </p>
               </div>
             </div>
-            <div className="px-4 py-3 sm:px-6 sm:py-4 space-y-3">
-              <div className="flex flex-col sm:flex-row gap-3">
-                <input
-                  type="text"
-                  value={instaHandle}
-                  onChange={(e) => setInstaHandle(e.target.value)}
-                  placeholder="@usuario ou url do Instagram"
-                  className="flex-1 px-4 py-2 border border-border rounded-lg bg-input-background text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
-                />
-                <button
-                  type="button"
-                  onClick={getInstaAvatar}
-                  disabled={instaLoading}
-                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
-                >
-                  {instaLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Buscar foto
-                </button>
-              </div>
-              {instaError && <p className="text-sm text-destructive">{instaError}</p>}
-              {instaUrl && !instaError && (
-                <div className="flex items-center gap-3">
-                  <div className="w-16 h-16 rounded-full overflow-hidden border border-border bg-muted">
-                    <img
-                      src={instaUrl}
-                      alt="Avatar Instagram"
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      onError={() => setInstaError('Não foi possível carregar a imagem retornada.')}
-                    />
-                  </div>
-                  <div className="text-sm text-muted-foreground break-all">
-                    <p>URL usada:</p>
-                    <p className="text-foreground">{instaUrl}</p>
-                  </div>
-                </div>
-              )}
+            <div className="px-4 py-3 sm:px-6 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                No iPhone/iPad você verá as instruções; no Chrome/Edge aparece o diálogo de instalação quando disponível.
+              </p>
+              <PwaInstallButton variant="button" className="sm:self-end" />
             </div>
           </div>
 

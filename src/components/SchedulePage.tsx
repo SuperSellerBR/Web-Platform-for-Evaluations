@@ -488,6 +488,8 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
   const weekDays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
   const isPastDate = (date: Date) => date < startOfToday && formatDateKey(date) !== todayKey;
+  const selectedDayDate = selectedDayKey ? parseDateKey(selectedDayKey) : null;
+  const selectedDayIsPast = selectedDayDate ? isPastDate(selectedDayDate) : false;
 
   const filteredEvaluations = evaluations.filter((evaluation) => {
     if (!selectedDayKey) return true;
@@ -511,9 +513,9 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
   };
 
   const handleMobileAddClick = () => {
-    const base = parseDateKey(selectedDayKey) || new Date();
-    const target = isPastDate(base) ? new Date() : base;
-    handleAddClick(target);
+    if (selectedDayIsPast) return;
+    const base = selectedDayDate || new Date();
+    handleAddClick(base);
   };
 
   const handleDelete = async (evaluationId: string) => {
@@ -629,11 +631,11 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
                   style={{
                     ...(isPast
                       ? {
-                          opacity: 0.25,
-                          filter: 'grayscale(1) saturate(0.6)',
+                          opacity: 0.6,
+                          filter: 'grayscale(0.4) saturate(0.85)',
                         }
                       : {}),
-                    ...(!isSelected && isToday
+                    ...(isToday
                       ? {
                           backgroundColor: 'rgba(59, 130, 246, 0.10)',
                           boxShadow:
@@ -647,7 +649,7 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
                     ${isSelected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' : ''}
                     ${
                       isPast
-                        ? 'bg-muted text-muted-foreground cursor-not-allowed pointer-events-none select-none'
+                        ? 'bg-muted text-muted-foreground cursor-pointer select-none'
                         : 'bg-card hover:border-primary/60'
                     }
                   `}
@@ -754,7 +756,8 @@ export function SchedulePage({ user, accessToken, onNavigate, onLogout }: Schedu
             <button
               type="button"
               onClick={handleMobileAddClick}
-              className="inline-flex items-center justify-center bg-blue-600 text-white p-2 rounded-full shadow-sm hover:bg-blue-700 transition"
+              disabled={selectedDayIsPast}
+              className="inline-flex items-center justify-center bg-blue-600 text-white p-2 rounded-full shadow-sm hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
               aria-label="Agendar avaliação"
             >
               <Plus className="w-4 h-4" />
